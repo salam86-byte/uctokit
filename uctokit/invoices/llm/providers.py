@@ -88,6 +88,28 @@ class OpenAICompatProvider:
         content = data["choices"][0]["message"]["content"]
         return parse_model_json(content)
 
+    def probe(self) -> str:
+        """Minimální ping endpointu pro ověření připojení. Vrací odpověď modelu."""
+        import requests
+
+        ep = self.endpoint
+        payload = {
+            "model": ep.model,
+            "messages": [
+                {"role": "system", "content": "Test spojení."},
+                {"role": "user", "content": "Odpověz jediným slovem OK."},
+            ],
+            "temperature": 0,
+            "max_tokens": 5,
+        }
+        headers = {"Content-Type": "application/json"}
+        if ep.api_key:
+            headers["Authorization"] = f"Bearer {ep.api_key}"
+        url = ep.base_url.rstrip("/") + "/chat/completions"
+        resp = requests.post(url, json=payload, headers=headers, timeout=ep.timeout)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
 
 class FallbackProvider:
     """Zkusí poskytovatele po řadě; první úspěch vyhrává.
@@ -118,3 +140,14 @@ class FallbackProvider:
         if last_error:
             raise last_error
         return {}
+
+    def probe(self) -> str:
+        last_error: Exception | None = None
+        for provider in self.providers:
+            try:
+                return provider.probe()
+            except Exception as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        return ""
