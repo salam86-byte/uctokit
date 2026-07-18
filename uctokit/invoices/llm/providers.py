@@ -100,7 +100,7 @@ class OpenAICompatProvider:
                 {"role": "user", "content": "Odpověz jediným slovem OK."},
             ],
             "temperature": 0,
-            "max_tokens": 5,
+            "max_tokens": 64,
         }
         headers = {"Content-Type": "application/json"}
         if ep.api_key:
