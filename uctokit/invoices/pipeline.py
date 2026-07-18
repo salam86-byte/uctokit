@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from . import ocr as _ocr
 from . import pdf_text as _pdf
+from . import qr as _qr
 from .heuristics import extract_from_text
 from .isdoc import parse_isdoc
 from .llm.base import LLMConfig, LLMInvoiceExtractor, build_provider
@@ -22,6 +23,7 @@ from .types import (
     SOURCE_HEURISTIC,
     SOURCE_ISDOC,
     SOURCE_OCR,
+    SOURCE_QR,
     SOURCE_VISION,
     SourceDocument,
 )
@@ -60,9 +62,29 @@ def extract(
                 warnings=warnings,
             )
 
+    # 2) QR Platba / QR Faktura (deterministické) – nejjistější zdroj po ISDOCu.
+    #    Když QR pokryje platební pole, drahou/pomalou AI úplně přeskočíme.
+    qr_inv = None
+    try:
+        qr_inv = _qr.extract_from_qr(document)
+    except Exception:
+        qr_inv = None
+    run_config = config
+    if qr_inv is not None and _qr_covers_payment(qr_inv):
+        run_config = replace(config, enable_llm=False)
+
+    result = _run_ladder(document, run_config, llm)
+    if qr_inv is not None:
+        result = _apply_qr(result, qr_inv)
+    return result
+
+
+def _run_ladder(document, config, llm) -> ExtractionResult:
+    """Zbytek žebříčku pod QR: text+LLM → sken (vision/OCR)+LLM."""
+    content = document.content or b""
     extractor = _resolve_llm(config, llm)
 
-    # 2) PDF s textovou vrstvou.
+    # PDF s textovou vrstvou.
     if document.looks_like_pdf:
         raw_text = _pdf.extract_text(content)
         if not _pdf.is_scanned(raw_text, min_chars=config.min_text_chars):
@@ -73,17 +95,50 @@ def extract(
             )
         return _from_scan(document, raw_text, extractor, config)
 
-    # 3) Obrázek (sken jako PNG/JPG).
+    # Obrázek (sken jako PNG/JPG).
     if document.looks_like_image:
         return _from_image(document, extractor, config)
 
-    # 4) Neznámý typ: zkus text (pdfplumber si někdy poradí), jinak prázdné.
+    # Neznámý typ: zkus text (pdfplumber si někdy poradí), jinak prázdné.
     raw_text = _pdf.extract_text(content)
     return _from_text(
         raw_text, extractor, config,
         heur_source=SOURCE_HEURISTIC,
         method_with_llm="text+llm", method_plain="text",
     )
+
+
+def _qr_covers_payment(qr: ExtractedInvoice) -> bool:
+    """QR nese to podstatné k zaplacení (účet/IBAN + částka) → AI netřeba."""
+    has_account = qr.supplier_account.is_present or qr.supplier_iban.is_present
+    return has_account and qr.total_amount.is_present
+
+
+def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResult:
+    """Přiloží QR pole navrch (deterministická, nejvyšší priorita)."""
+    inv = result.invoice
+    warnings = list(result.warnings)
+    contributed = False
+    for name, qf in qr.items():
+        if not qf.is_present:
+            continue
+        existing = getattr(inv, name)
+        if existing.is_present and not _values_agree(name, existing.value, qf.value):
+            warnings.append(
+                f"{name}: údaj z QR '{qf.value}' se liší od '{existing.value}' "
+                f"- použit QR (jistější)."
+            )
+        setattr(inv, name, Field(qf.value, qf.confidence, SOURCE_QR, qf.raw))
+        contributed = True
+    if not contributed:
+        return result
+    # QR se povedl přečíst – zahoď matoucí „nepodařilo přečíst" hlášky.
+    warnings = [w for w in warnings if "nepodařilo přečíst" not in w]
+    base = result.method
+    result.method = SOURCE_QR if (not base or base == SOURCE_QR) else f"{SOURCE_QR}+{base}"
+    result.overall_confidence = overall_confidence(inv)
+    result.warnings = warnings
+    return result
 
 
 # --- Dílčí cesty -------------------------------------------------------------

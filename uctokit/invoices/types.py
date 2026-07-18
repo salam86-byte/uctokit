@@ -26,6 +26,7 @@ FIELD_NAMES: tuple[str, ...] = (
 
 # Zdroj hodnoty (řadí se od nejdůvěryhodnějšího). Slouží i jako `method`.
 SOURCE_ISDOC = "isdoc"
+SOURCE_QR = "qr"
 SOURCE_PDF_TEXT = "pdf-text"
 SOURCE_OCR = "ocr"
 SOURCE_LLM = "llm"
