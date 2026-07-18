@@ -12,6 +12,7 @@ from decimal import Decimal
 from . import ocr as _ocr
 from . import pdf_text as _pdf
 from . import qr as _qr
+from . import xlsx_text as _xlsx
 from .heuristics import extract_from_text
 from .isdoc import parse_isdoc
 from .llm.base import LLMConfig, LLMInvoiceExtractor, build_provider
@@ -94,6 +95,15 @@ def _run_ladder(document, config, llm) -> ExtractionResult:
                 method_with_llm="pdf-text+llm", method_plain="pdf-text",
             )
         return _from_scan(document, raw_text, extractor, config)
+
+    # Tabulková faktura (XLSX) – sešit zploštíme na text a jedeme textovou cestou.
+    if document.looks_like_xlsx:
+        raw_text = _xlsx.extract_text(content)
+        return _from_text(
+            raw_text, extractor, config,
+            heur_source=SOURCE_HEURISTIC,
+            method_with_llm="xlsx+llm", method_plain="xlsx",
+        )
 
     # Obrázek (sken jako PNG/JPG).
     if document.looks_like_image:

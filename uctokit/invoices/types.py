@@ -71,6 +71,10 @@ class SourceDocument:
             self.media_type or ""
         ).startswith("image/")
 
+    @property
+    def looks_like_xlsx(self) -> bool:
+        return self.suffix == "xlsx" or "spreadsheetml" in (self.media_type or "")
+
 
 # --- Výstup ------------------------------------------------------------------
 
