@@ -1,0 +1,54 @@
+"""Testy ISDOC parseru."""
+
+import unittest
+from datetime import date
+from decimal import Decimal
+
+from uctokit.invoices.isdoc import parse_isdoc
+
+ISDOC_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
+  <ID>2025-1234</ID>
+  <IssueDate>2025-09-15</IssueDate>
+  <VariableSymbol>20251234</VariableSymbol>
+  <AccountingSupplierParty><Party>
+    <PartyIdentification><ID>12345679</ID></PartyIdentification>
+    <PartyName><Name>Sportovni potreby s.r.o.</Name></PartyName>
+  </Party></AccountingSupplierParty>
+  <PaymentMeans><Payment>
+    <Details><ID>1111111111</ID><BankCode>0800</BankCode><IBAN>CZ9708000000191111111111</IBAN></Details>
+    <PaymentDueDate>2025-09-30</PaymentDueDate>
+  </Payment></PaymentMeans>
+  <InvoiceSummary><PayableAmount>13000.00</PayableAmount></InvoiceSummary>
+</Invoice>"""
+
+
+class ParseIsdocTests(unittest.TestCase):
+    def test_extracts_all_fields(self):
+        inv = parse_isdoc(ISDOC_SAMPLE)
+        self.assertIsNotNone(inv)
+        self.assertEqual(inv.supplier_name.value, "Sportovni potreby s.r.o.")
+        self.assertEqual(inv.supplier_ico.value, "12345679")
+        self.assertEqual(inv.supplier_iban.value, "CZ9708000000191111111111")
+        self.assertEqual(inv.supplier_account.value, "1111111111/0800")
+        self.assertEqual(inv.total_amount.value, Decimal("13000.00"))
+        self.assertEqual(inv.currency.value, "CZK")
+        self.assertEqual(inv.variable_symbol.value, "20251234")
+        self.assertEqual(inv.invoice_number.value, "2025-1234")
+        self.assertEqual(inv.issue_date.value, date(2025, 9, 15))
+        self.assertEqual(inv.due_date.value, date(2025, 9, 30))
+
+    def test_present_fields_high_confidence(self):
+        inv = parse_isdoc(ISDOC_SAMPLE)
+        self.assertGreaterEqual(inv.supplier_name.confidence, 0.9)
+        self.assertEqual(inv.supplier_name.source, "isdoc")
+
+    def test_non_isdoc_xml_returns_none(self):
+        self.assertIsNone(parse_isdoc(b"<Something><x>1</x></Something>"))
+
+    def test_invalid_bytes_returns_none(self):
+        self.assertIsNone(parse_isdoc(b"not xml at all"))
+
+
+if __name__ == "__main__":
+    unittest.main()
