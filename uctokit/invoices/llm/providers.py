@@ -79,6 +79,11 @@ class OpenAICompatProvider:
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
+        if ep.disable_thinking:
+            # Vypnout reasoning u „thinking" modelů (Qwen3 na SGLangu) – jinak
+            # extrakce trvá minuty. SGLang/vLLM čtou chat_template_kwargs;
+            # doplníme i běžné alternativy, servery neznámé klíče ignorují.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         headers = {"Content-Type": "application/json"}
         if ep.api_key:
             headers["Authorization"] = f"Bearer {ep.api_key}"

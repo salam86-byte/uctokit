@@ -29,6 +29,7 @@ class LLMEndpoint:
     vision_model: str = "" # název vision modelu; prázdné = bez vision cesty
     vision_base_url: str = ""  # URL vision modelu; prázdné = stejná jako base_url
     timeout: int = 60
+    disable_thinking: bool = False  # u „thinking" modelů (Qwen3) vypne reasoning
 
     @property
     def supports_vision(self) -> bool:

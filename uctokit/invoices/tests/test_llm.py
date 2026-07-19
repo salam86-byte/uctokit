@@ -41,6 +41,21 @@ class TwoEndpointRoutingTests(unittest.TestCase):
             prov.complete_json(system="s", user="u", images=[b"i"])
             self.assertEqual(post.call_args.args[0], "http://only:1/v1/chat/completions")
 
+    def test_disable_thinking_adds_chat_template_kwargs(self):
+        prov = OpenAICompatProvider(
+            LLMEndpoint(base_url="http://x/v1", model="m", disable_thinking=True)
+        )
+        with mock.patch("requests.post", return_value=_Resp("{}")) as post:
+            prov.complete_json(system="s", user="u")
+            body = post.call_args.kwargs["json"]
+            self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_no_chat_template_kwargs_when_thinking_enabled(self):
+        prov = OpenAICompatProvider(LLMEndpoint(base_url="http://x/v1", model="m"))
+        with mock.patch("requests.post", return_value=_Resp("{}")) as post:
+            prov.complete_json(system="s", user="u")
+            self.assertNotIn("chat_template_kwargs", post.call_args.kwargs["json"])
+
 
 if __name__ == "__main__":
     unittest.main()
