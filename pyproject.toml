@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uctokit"
+version = "0.1.0"
+description = "Frameworkově neutrální jádro pro zpracování přijatých faktur, plateb (Fio) a registrů (ARES/MFČR). Čistý Python, bez závislosti na web frameworku."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+keywords = ["faktury", "isdoc", "spayd", "fio", "ares", "mfcr", "invoices"]
+
+# Jádro: to, co potřebuje primární (ne-fallback) cesta – čtení textu z PDF,
+# XLSX, render PDF→obrázek + čtení QR (bez systémových knihoven) a HTTP registry.
+# Odvozeno z reálných importů v balíku; těžké/systémové věci jsou v extras níže.
+dependencies = [
+    "pdfplumber>=0.11",   # extrakce textu z přijatých PDF faktur
+    "openpyxl>=3.1",      # čtení faktur/dat v .xlsx
+    "pypdfium2>=4",       # render PDF→obrázek (pip wheel, bez system lib) pro čtení QR
+    "zxing-cpp>=2.2",     # čtení QR Platby/Faktury (SPAYD/SID)
+    "pillow>=10.0",       # obrázky – render QR (pypdfium2 → PIL) i vstup obrázkových dokladů
+    "requests>=2.31",     # ARES / MFČR registry + HTTP LLM provider
+]
+
+[project.optional-dependencies]
+# OCR skenovaných faktur a render pro vision LLM. Vyžaduje i systémové binárky:
+# tesseract (pytesseract) a poppler (pdf2image).
+ocr = [
+    "pdf2image>=1.16",
+    "pytesseract>=0.3.10",
+]
+# Záložní QR dekodéry, když není k dispozici zxing-cpp. pyzbar vyžaduje systémový zbar.
+qr-fallback = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "pyzbar>=0.1.9",
+]
+# Vývoj a testy.
+dev = [
+    "pytest>=8",
+]
+
+[tool.setuptools.packages.find]
+include = ["uctokit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["uctokit"]
+python_files = ["test_*.py"]

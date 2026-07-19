@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtuální prostředí
+.venv/
+venv/
+
+# Testy / nástroje
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
