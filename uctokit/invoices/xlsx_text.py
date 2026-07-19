@@ -27,8 +27,11 @@ def extract_text(content: bytes, *, max_rows: int = 400) -> str:
             if len(wb.worksheets) > 1:
                 lines.append(f"# List: {ws.title}")
             rows = 0
-            for row in ws.iter_rows(values_only=True):
-                cells = [_fmt(c) for c in row if c is not None and str(c).strip() != ""]
+            for row in ws.iter_rows():
+                cells = [
+                    _fmt(c.value, number_format=c.number_format)
+                    for c in row if c.value is not None and str(c.value).strip() != ""
+                ]
                 if cells:
                     lines.append("\t".join(cells))
                 rows += 1
@@ -42,7 +45,7 @@ def extract_text(content: bytes, *, max_rows: int = 400) -> str:
     return "\n".join(lines)
 
 
-def _fmt(value) -> str:
+def _fmt(value, *, number_format: str = "") -> str:
     """Buňka na text – datum/čas bez času navíc, čísla bez zbytečných nul."""
     from datetime import date, datetime
 
@@ -50,6 +53,16 @@ def _fmt(value) -> str:
         return value.date().isoformat() if value.time().hour == 0 and value.time().minute == 0 else value.isoformat(sep=" ")
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, (int, float)) and _format_has_decimals(number_format):
+        return f"{value:.2f}"
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value).strip()
+
+
+def _format_has_decimals(number_format: str) -> bool:
+    """Pozná, že zobrazení buňky vyžaduje alespoň dvě desetinná místa."""
+    import re
+
+    fmt = re.sub(r'"[^"]*"', "", number_format or "")
+    return bool(re.search(r"[.,]0{2,}", fmt))

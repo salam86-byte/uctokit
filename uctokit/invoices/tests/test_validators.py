@@ -29,6 +29,9 @@ class NormalizeDateTests(unittest.TestCase):
     def test_iso(self):
         self.assertEqual(V.normalize_date("2025-09-01"), date(2025, 9, 1))
 
+    def test_czech_two_digit_year(self):
+        self.assertEqual(V.normalize_date("08.06.26"), date(2026, 6, 8))
+
     def test_czech(self):
         self.assertEqual(V.normalize_date("1. 9. 2025"), date(2025, 9, 1))
 

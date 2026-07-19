@@ -35,6 +35,10 @@ SYSTEM_PROMPT = (
     "- invoice_number: číslo faktury (řetězec)\n"
     "- issue_date: datum vystavení ve formátu YYYY-MM-DD\n"
     "- due_date: datum splatnosti ve formátu YYYY-MM-DD\n"
+    "Text z PDF může mít promíchané levé a pravé sloupce. Vždy rozliš "
+    "sekci Dodavatel od Odběratel/Plátce a neber údaje našeho klubu z odběratele. "
+    "Datum vystavení nezaměň s datem v patě, rejstříku ani datem zdanitelného "
+    "plnění. U XLSX mohou být číslo účtu a kód banky v oddělených buňkách.\n"
     "Nevymýšlej hodnoty. Vrať čistý JSON bez markdown ohraničení."
 )
 

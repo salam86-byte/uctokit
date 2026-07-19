@@ -103,6 +103,19 @@ class TextPathTests(unittest.TestCase):
         self.assertEqual(r.invoice.supplier_ico.value, "00000000")  # LLM vyhrává hodnotou
         self.assertTrue(any("supplier_ico" in w for w in r.warnings))
 
+    def test_keyed_dates_beat_unrelated_footer_date(self):
+        text = (
+            "Faktura 260133\nDatum splatnosti: 22.06.26\n"
+            "Datum vystavení: 08.06.26\nK úhradě v Kč: 6 300.00\n"
+            "Firma zapsána dne 04.06.2013 u krajského soudu."
+        )
+        with mock.patch("uctokit.invoices.pdf_text.extract_text", return_value=text):
+            r = extract(SourceDocument(b"%PDF-fake", "faktura.pdf"), llm=None)
+        self.assertEqual(r.invoice.invoice_number.value, "260133")
+        self.assertEqual(r.invoice.issue_date.value, date(2026, 6, 8))
+        self.assertEqual(r.invoice.due_date.value, date(2026, 6, 22))
+        self.assertEqual(r.invoice.total_amount.value, Decimal("6300.00"))
+
 
 class ScanPathTests(unittest.TestCase):
     def test_vision_when_available(self):

@@ -7,6 +7,7 @@ testuje injektováním známého QR výsledku (bez reálného dekódování obr�
 import unittest
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from uctokit.invoices import pipeline as P
 from uctokit.invoices import qr
@@ -91,7 +92,7 @@ class QrInPipelineTests(unittest.TestCase):
     def _inject(self, inv):
         qr.extract_from_qr = lambda document: inv
 
-    def test_qr_covers_payment_skips_llm(self):
+    def test_payment_only_qr_does_not_skip_llm(self):
         payment = ExtractedInvoice()
         payment.supplier_account = Field("1111111111/0600", 0.95, "qr")
         payment.total_amount = Field(Decimal("100.00"), 0.95, "qr")
@@ -100,15 +101,28 @@ class QrInPipelineTests(unittest.TestCase):
         self._inject(payment)
 
         llm = _StubLLM()
-        # PDF bez textové vrstvy by jinak šlo na vision LLM – teď se přeskočí.
+        self.assertFalse(P._qr_covers_invoice(payment))
         doc = SourceDocument(content=b"%PDF-1.4 sken", filename="faktura.pdf")
-        result = P.extract(doc, llm=llm)
+        with mock.patch("uctokit.invoices.pdf_text.extract_text", return_value="Faktura 2026001\n" + "x" * 50):
+            result = P.extract(doc, llm=llm)
 
-        self.assertEqual(llm.text_calls, 0)
-        self.assertEqual(llm.image_calls, 0)     # AI přeskočena – QR stačí
+        self.assertEqual(llm.text_calls, 1)      # AI doplní hlavičku faktury
+        self.assertEqual(llm.image_calls, 0)
         self.assertTrue(result.method.startswith("qr"))
         self.assertEqual(result.invoice.total_amount.value, Decimal("100.00"))
         self.assertEqual(result.invoice.supplier_account.value, "1111111111/0600")
+
+    def test_complete_sid_can_skip_llm(self):
+        complete = qr.parse_spayd(
+            "SID*1.0*ACC:CZ6706000000001111111111*AM:100*CC:CZK*DT:20260215"
+            "*DD:20260201*ID:FA-1*INI:12345679"
+        )
+        self.assertTrue(P._qr_covers_invoice(complete))
+        self._inject(complete)
+        llm = _StubLLM()
+        with mock.patch("uctokit.invoices.pdf_text.extract_text", return_value="Faktura FA-1\n" + "x" * 50):
+            P.extract(SourceDocument(b"%PDF", "faktura.pdf"), llm=llm)
+        self.assertEqual(llm.text_calls, 0)
 
     def test_partial_qr_does_not_skip_ai_but_wins_values(self):
         # QR nese jen částku (ne účet) → AI se nepřeskočí, ale QR přebije hodnotu.

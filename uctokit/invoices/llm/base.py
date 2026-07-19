@@ -23,15 +23,21 @@ BASE_VISION_CONFIDENCE = 0.65
 class LLMEndpoint:
     """Jeden OpenAI-kompatibilní endpoint (lokální i cloud)."""
 
-    base_url: str          # např. http://localhost:30000/v1
+    base_url: str          # URL textového modelu, např. http://sglang:30000/v1
     model: str             # název textového modelu (Qwen…)
     api_key: str = ""      # u lokálních často prázdné
     vision_model: str = "" # název vision modelu; prázdné = bez vision cesty
+    vision_base_url: str = ""  # URL vision modelu; prázdné = stejná jako base_url
     timeout: int = 60
 
     @property
     def supports_vision(self) -> bool:
         return bool(self.vision_model)
+
+    @property
+    def vision_url(self) -> str:
+        """URL vision modelu – vlastní, jinak stejná jako textová."""
+        return self.vision_base_url or self.base_url
 
 
 @dataclass(frozen=True)

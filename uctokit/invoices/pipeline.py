@@ -64,14 +64,15 @@ def extract(
             )
 
     # 2) QR Platba / QR Faktura (deterministické) – nejjistější zdroj po ISDOCu.
-    #    Když QR pokryje platební pole, drahou/pomalou AI úplně přeskočíme.
+    #    Běžné QR Platba ale neobsahuje dodavatele, IČO ani datum vystavení,
+    #    proto AI přeskakujeme jen u skutečně kompletního QR Faktura (SID).
     qr_inv = None
     try:
         qr_inv = _qr.extract_from_qr(document)
     except Exception:
         qr_inv = None
     run_config = config
-    if qr_inv is not None and _qr_covers_payment(qr_inv):
+    if qr_inv is not None and _qr_covers_invoice(qr_inv):
         run_config = replace(config, enable_llm=False)
 
     result = _run_ladder(document, run_config, llm)
@@ -122,6 +123,18 @@ def _qr_covers_payment(qr: ExtractedInvoice) -> bool:
     """QR nese to podstatné k zaplacení (účet/IBAN + částka) → AI netřeba."""
     has_account = qr.supplier_account.is_present or qr.supplier_iban.is_present
     return has_account and qr.total_amount.is_present
+
+
+def _qr_covers_invoice(qr: ExtractedInvoice) -> bool:
+    """QR má platbu i identitu dokladu, takže AI už nemá co podstatného doplnit."""
+    has_supplier = qr.supplier_name.is_present or qr.supplier_ico.is_present
+    return (
+        _qr_covers_payment(qr)
+        and has_supplier
+        and qr.invoice_number.is_present
+        and qr.issue_date.is_present
+        and qr.due_date.is_present
+    )
 
 
 def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResult:

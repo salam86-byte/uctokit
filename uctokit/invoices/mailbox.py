@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from email.header import decode_header, make_header
 from email.utils import parseaddr
 
-DEFAULT_EXTENSIONS = (".pdf", ".isdoc", ".xml", ".xlsx")
+DEFAULT_EXTENSIONS = (
+    ".pdf", ".isdoc", ".xml", ".xlsx",
+    ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff",
+)
 DEFAULT_MAX_BYTES = 15 * 1024 * 1024  # 15 MB / příloha
 
 

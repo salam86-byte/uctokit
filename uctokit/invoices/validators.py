@@ -47,7 +47,12 @@ def normalize_amount(raw) -> Decimal | None:
 
 
 def normalize_date(raw) -> date | None:
-    """Rozparsuje datum z ISO (``2025-09-01``) i českého (``1. 9. 2025``)."""
+    """Rozparsuje ISO i české datum se čtyř- nebo dvouciferným rokem.
+
+    Dvouciferný rok se u faktur vykládá jako 2000–2099. Starší doklady
+    se v importu neočekávají a tento postup brání tomu, aby ``26`` skončilo
+    jako rok 1926.
+    """
     if isinstance(raw, date):
         return raw
     if not raw:
@@ -56,9 +61,12 @@ def normalize_date(raw) -> date | None:
     m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
     if m:
         return _safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    m = re.search(r"(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})", text)
+    m = re.search(r"(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2}|\d{4})(?!\d)", text)
     if m:
-        return _safe_date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        year = int(m.group(3))
+        if len(m.group(3)) == 2:
+            year += 2000
+        return _safe_date(year, int(m.group(2)), int(m.group(1)))
     return None
 
 

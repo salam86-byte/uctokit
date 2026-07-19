@@ -74,8 +74,14 @@ class MailboxTests(unittest.TestCase):
         result, _ = _run([(b"1", raw)], _config(allowed_senders=("ok@x.cz",)))
         self.assertEqual(len(result), 1)
 
-    def test_extension_filtered(self):
-        raw = _make_email("d@x.cz", "Foto", "obrazek.png", b"PNGDATA", subtype="png")
+    def test_image_attachment_is_accepted(self):
+        raw = _make_email("d@x.cz", "Foto", "faktura.png", b"PNGDATA", subtype="png")
+        result, _ = _run([(b"1", raw)], _config())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].filename, "faktura.png")
+
+    def test_unsupported_extension_filtered(self):
+        raw = _make_email("d@x.cz", "Text", "poznamka.txt", b"TEXT", subtype="plain")
         result, _ = _run([(b"1", raw)], _config())
         self.assertEqual(result, [])
 

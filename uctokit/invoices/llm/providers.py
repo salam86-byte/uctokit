@@ -61,6 +61,7 @@ class OpenAICompatProvider:
         ep = self.endpoint
         if images:
             model = ep.vision_model or ep.model
+            base_url = ep.vision_url  # vision může běžet na jiném endpointu (Ollama)
             content = [{"type": "text", "text": user}]
             for img in images:
                 content.append(
@@ -69,6 +70,7 @@ class OpenAICompatProvider:
             user_message = {"role": "user", "content": content}
         else:
             model = ep.model
+            base_url = ep.base_url  # text běží na svém endpointu (SGLang)
             user_message = {"role": "user", "content": user}
 
         payload = {
@@ -81,7 +83,7 @@ class OpenAICompatProvider:
         if ep.api_key:
             headers["Authorization"] = f"Bearer {ep.api_key}"
 
-        url = ep.base_url.rstrip("/") + "/chat/completions"
+        url = base_url.rstrip("/") + "/chat/completions"
         resp = requests.post(url, json=payload, headers=headers, timeout=ep.timeout)
         resp.raise_for_status()
         data = resp.json()
@@ -106,6 +108,30 @@ class OpenAICompatProvider:
         if ep.api_key:
             headers["Authorization"] = f"Bearer {ep.api_key}"
         url = ep.base_url.rstrip("/") + "/chat/completions"
+        resp = requests.post(url, json=payload, headers=headers, timeout=ep.timeout)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+    def probe_vision(self) -> str:
+        """Ping vision endpointu/modelu (na vlastní URL). Prázdné = bez vision."""
+        import requests
+
+        ep = self.endpoint
+        if not ep.vision_model:
+            return ""
+        payload = {
+            "model": ep.vision_model,
+            "messages": [
+                {"role": "system", "content": "Test spojení."},
+                {"role": "user", "content": "Odpověz jediným slovem OK."},
+            ],
+            "temperature": 0,
+            "max_tokens": 64,
+        }
+        headers = {"Content-Type": "application/json"}
+        if ep.api_key:
+            headers["Authorization"] = f"Bearer {ep.api_key}"
+        url = ep.vision_url.rstrip("/") + "/chat/completions"
         resp = requests.post(url, json=payload, headers=headers, timeout=ep.timeout)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -146,6 +172,19 @@ class FallbackProvider:
         for provider in self.providers:
             try:
                 return provider.probe()
+            except Exception as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        return ""
+
+    def probe_vision(self) -> str:
+        last_error: Exception | None = None
+        for provider in self.providers:
+            if not getattr(provider, "supports_vision", False):
+                continue
+            try:
+                return provider.probe_vision()
             except Exception as exc:
                 last_error = exc
         if last_error:
