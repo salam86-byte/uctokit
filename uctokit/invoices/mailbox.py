@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import email
 import imaplib
+import re
 from dataclasses import dataclass, field
 from email.header import decode_header, make_header
 from email.utils import parseaddr
@@ -45,6 +46,7 @@ class FetchedAttachment:
     sender: str = ""
     subject: str = ""
     message_uid: str = ""
+    body_text: str = ""
 
 
 def _decode(value: str) -> str:
@@ -54,6 +56,40 @@ def _decode(value: str) -> str:
         return str(make_header(decode_header(value)))
     except Exception:
         return value
+
+
+def _extract_body_text(message, *, max_chars: int = 20000) -> str:
+    """Vytáhne čitelný text těla e-mailu. Preferuje text/plain; když není,
+    z text/html hrubě odstraní značky. Přílohy (mají filename) přeskočí.
+
+    Bezpečnost: vrací jen prostý text (žádné HTML) — konzument ho má stejně
+    zobrazit escapovaně; obsah je nedůvěryhodný."""
+    plain: list[str] = []
+    html: list[str] = []
+    for part in message.walk():
+        if part.get_content_maintype() == "multipart" or part.get_filename():
+            continue
+        ctype = part.get_content_type()
+        if ctype not in ("text/plain", "text/html"):
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            text = payload.decode(charset, errors="replace")
+        except (LookupError, ValueError):
+            text = payload.decode("utf-8", errors="replace")
+        (plain if ctype == "text/plain" else html).append(text)
+
+    out = "\n".join(t.strip() for t in plain if t.strip())
+    if not out and html:
+        stripped = re.sub(r"(?is)<(script|style).*?</\1>", " ", "\n".join(html))
+        stripped = re.sub(r"(?i)<br\s*/?>", "\n", stripped)
+        stripped = re.sub(r"<[^>]+>", " ", stripped)
+        import html as _html
+        out = re.sub(r"[ \t]+", " ", _html.unescape(stripped)).strip()
+    return out[:max_chars]
 
 
 def _raw_message(msgdata) -> bytes | None:
@@ -101,6 +137,8 @@ def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) ->
                 _mark_seen(conn, uid, config)
                 continue
 
+            body_text = _extract_body_text(message)
+
             for part in message.walk():
                 filename = part.get_filename()
                 if not filename or not filename.lower().endswith(allowed_ext):
@@ -114,6 +152,7 @@ def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) ->
                     sender=sender,
                     subject=subject,
                     message_uid=uid_str,
+                    body_text=body_text,
                 ))
             _mark_seen(conn, uid, config)
     finally:

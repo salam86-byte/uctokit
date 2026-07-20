@@ -150,6 +150,21 @@ class QrInPipelineTests(unittest.TestCase):
         self.assertEqual(merged.method, "qr+pdf-text")
         self.assertTrue(any("QR" in w for w in merged.warnings))
 
+    def test_qr_does_not_override_full_supplier_name(self):
+        # QR/SPD název je oříznutý/verzálky → NEPŘEPÍŠE plný název z textu,
+        # ostatní QR pole (VS) se ale přiloží normálně.
+        base = P.ExtractionResult(invoice=ExtractedInvoice(), method="pdf-text")
+        base.invoice.supplier_name = Field("Čerpací karty s.r.o., odštěpný závod", 0.85, "pdf-text")
+        base.invoice.total_amount = Field(Decimal("100.00"), 0.8, "pdf-text")
+        qr_inv = ExtractedInvoice()
+        qr_inv.supplier_name = Field("CERPACI KARTY S.R.O. ODSTEPNY ZA", 0.9, "qr")
+        qr_inv.variable_symbol = Field("2640173", 0.95, "qr")
+        merged = P._apply_qr(base, qr_inv)
+        self.assertEqual(
+            merged.invoice.supplier_name.value, "Čerpací karty s.r.o., odštěpný závod"
+        )
+        self.assertEqual(merged.invoice.variable_symbol.value, "2640173")
+
 
 if __name__ == "__main__":
     unittest.main()

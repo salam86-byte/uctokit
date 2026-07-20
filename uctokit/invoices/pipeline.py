@@ -12,6 +12,7 @@ from decimal import Decimal
 from . import ocr as _ocr
 from . import pdf_text as _pdf
 from . import qr as _qr
+from . import validators as _V
 from . import xlsx_text as _xlsx
 from .heuristics import extract_from_text
 from .isdoc import parse_isdoc
@@ -137,6 +138,11 @@ def _qr_covers_invoice(qr: ExtractedInvoice) -> bool:
     )
 
 
+# Pole, která QR NESMÍ přepsat, když už mají hodnotu z bohatšího zdroje.
+# QR/SPD nese jen oříznutý název příjemce (verzálky, bez diakritiky).
+_QR_NAME_KEEP = {"supplier_name"}
+
+
 def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResult:
     """Přiloží QR pole navrch (deterministická, nejvyšší priorita)."""
     inv = result.invoice
@@ -146,6 +152,11 @@ def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResul
         if not qf.is_present:
             continue
         existing = getattr(inv, name)
+        # Název dodavatele z QR/SPD je verzálkami, bez diakritiky a oříznutý na
+        # délku — pokud už název máme z bohatšího zdroje (text/LLM/ISDOC),
+        # NEPŘEPISUJ ho. QR název slouží jen jako záloha, když jinde není.
+        if name in _QR_NAME_KEEP and existing.is_present:
+            continue
         if existing.is_present and not _values_agree(name, existing.value, qf.value):
             warnings.append(
                 f"{name}: údaj z QR '{qf.value}' se liší od '{existing.value}' "
@@ -283,6 +294,14 @@ def _values_agree(name: str, a, b) -> bool:
     return str(a).strip().upper() == str(b).strip().upper()
 
 
+# Pole, u nichž umíme rozhodnout platnost tvrdým validátorem (checksum). Když
+# se zdroje neshodnou a jen jedna hodnota projde, vyhraje ta platná.
+_FIELD_VALIDATORS = {
+    "supplier_ico": _V.valid_ico,
+    "supplier_iban": _V.valid_iban,
+}
+
+
 def _merge(llm_inv: ExtractedInvoice | None, heur: ExtractedInvoice):
     """Sloučí LLM a heuristiku po polích. LLM vyhrává hodnotou; shoda zvedá důvěru."""
     result = ExtractedInvoice()
@@ -296,6 +315,27 @@ def _merge(llm_inv: ExtractedInvoice | None, heur: ExtractedInvoice):
             if _values_agree(name, lf.value, hf.value):
                 chosen = Field(lf.value, min(0.95, lf.confidence + 0.15), lf.source, lf.raw)
             else:
+                # Pole s tvrdým validátorem (IČO/IBAN checksum): když projde jen
+                # jedna z hodnot, vyhraje PLATNÁ — neplatná hodnota (typicky
+                # halucinace LLM) nikdy není správně, i kdyby ji dala „jistější"
+                # cesta. Jen jedna z hodnot neplatná → vezmi tu druhou.
+                validator = _FIELD_VALIDATORS.get(name)
+                if validator is not None:
+                    lf_ok, hf_ok = validator(str(lf.value)), validator(str(hf.value))
+                    if hf_ok and not lf_ok:
+                        setattr(result, name, Field(hf.value, max(0.4, hf.confidence), hf.source, hf.raw))
+                        warnings.append(
+                            f"{name}: hodnota z LLM '{lf.value}' neprošla kontrolou, "
+                            f"použita platná '{hf.value}'."
+                        )
+                        continue
+                    if lf_ok and not hf_ok:
+                        setattr(result, name, Field(lf.value, max(0.4, lf.confidence), lf.source, lf.raw))
+                        warnings.append(
+                            f"{name}: hodnota z heuristiky '{hf.value}' neprošla kontrolou, "
+                            f"použita platná '{lf.value}'."
+                        )
+                        continue
                 chosen = Field(lf.value, max(0.4, lf.confidence - 0.15), lf.source, lf.raw)
                 warnings.append(
                     f"{name}: heuristika '{hf.value}' != LLM '{lf.value}' - zkontrolujte."

@@ -98,10 +98,11 @@ class TextPathTests(unittest.TestCase):
         self.assertFalse(r.invoice.supplier_name.is_present)
 
     def test_disagreement_warns(self):
+        # LLM dá NEPLATNÉ IČO, heuristika platné → vyhraje PLATNÉ + varování.
         payload = dict(LLM_PAYLOAD, supplier_ico="00000000")
         r = self._run(fake_extractor(payload))
-        self.assertEqual(r.invoice.supplier_ico.value, "00000000")  # LLM vyhrává hodnotou
-        self.assertTrue(any("supplier_ico" in w for w in r.warnings))
+        self.assertEqual(r.invoice.supplier_ico.value, "12345679")  # platná heuristika vyhrává
+        self.assertTrue(any("neprošla" in w or "kontrolou" in w for w in r.warnings))
 
     def test_keyed_dates_beat_unrelated_footer_date(self):
         text = (
@@ -144,6 +145,40 @@ class LegacyDictTests(unittest.TestCase):
         self.assertEqual(d["total_amount"], Decimal("13000.00"))
         self.assertEqual(d["method"], "isdoc")
         self.assertIn("supplier_iban", d)
+
+
+class MergeValidatorTests(unittest.TestCase):
+    """Slučování LLM+heuristika: u polí s checksumem vyhraje PLATNÁ hodnota."""
+
+    def _ico(self, llm_val, heur_val):
+        from uctokit.invoices import pipeline as P
+        from uctokit.invoices.types import ExtractedInvoice, Field
+        llm, heur = ExtractedInvoice(), ExtractedInvoice()
+        llm.supplier_ico = Field(llm_val, 0.7, "llm")
+        heur.supplier_ico = Field(heur_val, 0.5, "heuristic")
+        merged, warnings = P._merge(llm, heur)
+        return merged.supplier_ico.value, warnings
+
+    def test_valid_heuristic_beats_invalid_llm(self):
+        val, warnings = self._ico("00000000", "12345679")  # LLM neplatné
+        self.assertEqual(val, "12345679")
+        self.assertTrue(any("neprošla" in w for w in warnings))
+
+    def test_valid_llm_beats_invalid_heuristic(self):
+        val, warnings = self._ico("12345679", "00000000")  # heuristika neplatná
+        self.assertEqual(val, "12345679")
+        self.assertTrue(any("neprošla" in w for w in warnings))
+
+    def test_generic_field_llm_wins_with_warning(self):
+        # Pole bez validátoru (invoice_number) → dnešní chování: LLM vyhrává + varuje.
+        from uctokit.invoices import pipeline as P
+        from uctokit.invoices.types import ExtractedInvoice, Field
+        llm, heur = ExtractedInvoice(), ExtractedInvoice()
+        llm.invoice_number = Field("FA-AI", 0.7, "llm")
+        heur.invoice_number = Field("FA-TXT", 0.5, "heuristic")
+        merged, warnings = P._merge(llm, heur)
+        self.assertEqual(merged.invoice_number.value, "FA-AI")
+        self.assertTrue(any("zkontrolujte" in w for w in warnings))
 
 
 if __name__ == "__main__":
