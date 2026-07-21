@@ -54,6 +54,36 @@ class FetchedAttachment:
     body_text: str = ""
 
 
+@dataclass(frozen=True)
+class SkippedAttachment:
+    """Příloha, kterou jsme NEVZALI — i s důvodem.
+
+    Tiché zahození je nejhorší možné chování: faktura zmizí a nikdo se to
+    nedozví. Konzument si důvod uloží a ukáže člověku.
+    """
+    filename: str
+    reason: str          # "extension" | "too_big" | "empty"
+    size: int = 0
+
+
+@dataclass(frozen=True)
+class FetchedMessage:
+    """Jedna zpráva ze schránky se VŠÍM, co se z ní dalo zjistit.
+
+    Vrací se i pro zprávu, ze které nic nevzešlo (bez příloh, samé nepovolené
+    typy, zablokovaný odesílatel) — právě aby bylo vidět, že přišla.
+    """
+    uid: str
+    sender: str = ""
+    subject: str = ""
+    date: str = ""
+    message_id: str = ""
+    body_text: str = ""
+    attachments: tuple[FetchedAttachment, ...] = ()
+    skipped: tuple[SkippedAttachment, ...] = ()
+    sender_blocked: bool = False
+
+
 def _decode(value: str) -> str:
     if not value:
         return ""
@@ -115,55 +145,76 @@ def _open_imap(config: MailboxConfig):
     return conn
 
 
-def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) -> list[FetchedAttachment]:
-    """Stáhne přílohy faktur ze schránky. Vrací seznam příloh.
+def fetch_invoice_messages(config: MailboxConfig, *, open_connection=None) -> list[FetchedMessage]:
+    """Projde schránku a vrátí ZÁZNAM O KAŽDÉ zprávě, ne jen přijaté přílohy.
+
+    Zpráva se vrací i tehdy, když z ní nic nevzešlo — bez příloh, samé
+    nepovolené typy, zablokovaný odesílatel. Konzument tak může ukázat,
+    co přišlo a proč se z toho nestala faktura; tiché zahození je přesně
+    ten způsob, jak se ztrácejí doklady.
 
     Které zprávy se berou, řídí ``config.search_criteria`` (výchozí ``UNSEEN``).
-
-    ``open_connection`` (kvůli testům) je callable ``(config) -> conn`` vracející
-    již přihlášené a vybrané spojení; jinak se sestaví reálné IMAP spojení.
+    ``open_connection`` (kvůli testům) je callable ``(config) -> conn``.
     """
     conn = (open_connection or _open_imap)(config)
     allowed_ext = tuple(e.lower() for e in config.allowed_extensions)
     allowed_senders = tuple(s.lower() for s in config.allowed_senders)
-    attachments: list[FetchedAttachment] = []
+    messages: list[FetchedMessage] = []
     try:
         typ, data = conn.search(None, config.search_criteria or "UNSEEN")
         uids = data[0].split() if data and data[0] else []
         for uid in uids:
+            uid_str = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
             typ, msgdata = conn.fetch(uid, "(RFC822)")
             raw = _raw_message(msgdata)
             if not raw:
+                # I nečitelná zpráva musí být vidět, ať se neztratí beze stopy.
+                messages.append(FetchedMessage(uid=uid_str, subject="(zprávu se nepodařilo načíst)"))
                 continue
             message = email.message_from_bytes(raw)
             sender = parseaddr(message.get("From", ""))[1].lower()
             subject = _decode(message.get("Subject", ""))
-            uid_str = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            date = _decode(message.get("Date", ""))
+            message_id = (message.get("Message-ID", "") or "").strip()
 
             if allowed_senders and sender not in allowed_senders:
+                messages.append(FetchedMessage(
+                    uid=uid_str, sender=sender, subject=subject, date=date,
+                    message_id=message_id, sender_blocked=True))
                 _mark_seen(conn, uid, config)
                 continue
 
             body_text = _extract_body_text(message)
+            taken: list[FetchedAttachment] = []
+            skipped: list[SkippedAttachment] = []
 
             for part in message.walk():
                 # Dekódovat MIME hlavičku MUSÍME PŘED kontrolou přípony. Jméno
                 # s diakritikou přijde jako "=?UTF-8?Q?Faktura_vydan=C3=A1…=2Epdf?="
                 # a to na ".pdf" nekončí — česká faktura by se tiše zahodila.
                 filename = _decode(part.get_filename() or "")
-                if not filename or not filename.lower().endswith(allowed_ext):
+                if not filename:
                     continue
                 payload = part.get_payload(decode=True) or b""
-                if not payload or len(payload) > config.max_bytes:
+                if not filename.lower().endswith(allowed_ext):
+                    skipped.append(SkippedAttachment(filename, "extension", len(payload)))
                     continue
-                attachments.append(FetchedAttachment(
-                    filename=filename,
-                    content=payload,
-                    sender=sender,
-                    subject=subject,
-                    message_uid=uid_str,
-                    body_text=body_text,
+                if not payload:
+                    skipped.append(SkippedAttachment(filename, "empty", 0))
+                    continue
+                if len(payload) > config.max_bytes:
+                    skipped.append(SkippedAttachment(filename, "too_big", len(payload)))
+                    continue
+                taken.append(FetchedAttachment(
+                    filename=filename, content=payload, sender=sender,
+                    subject=subject, message_uid=uid_str, body_text=body_text,
                 ))
+
+            messages.append(FetchedMessage(
+                uid=uid_str, sender=sender, subject=subject, date=date,
+                message_id=message_id, body_text=body_text,
+                attachments=tuple(taken), skipped=tuple(skipped),
+            ))
             _mark_seen(conn, uid, config)
     finally:
         for close in (getattr(conn, "close", None), getattr(conn, "logout", None)):
@@ -172,7 +223,19 @@ def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) ->
                     close()
                 except Exception:
                     pass
-    return attachments
+    return messages
+
+
+def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) -> list[FetchedAttachment]:
+    """Jen přijaté přílohy (tenká vrstva nad :func:`fetch_invoice_messages`).
+
+    Ponecháno kvůli volajícím, které nezajímá, co se nevzalo.
+    """
+    return [
+        att
+        for msg in fetch_invoice_messages(config, open_connection=open_connection)
+        for att in msg.attachments
+    ]
 
 
 def _mark_seen(conn, uid, config: MailboxConfig) -> None:

@@ -3,7 +3,9 @@
 import unittest
 from email.message import EmailMessage
 
-from uctokit.invoices.mailbox import MailboxConfig, fetch_invoice_attachments
+from uctokit.invoices.mailbox import (
+    MailboxConfig, fetch_invoice_attachments, fetch_invoice_messages,
+)
 
 
 def _make_email(sender, subject, filename, content, subtype="pdf"):
@@ -184,3 +186,63 @@ class SearchCriteriaTests(unittest.TestCase):
         fake.search = lambda charset, crit: (seen.setdefault("crit", crit), ("OK", [b"1"]))[1]
         fetch_invoice_attachments(_config(search_criteria="ALL"), open_connection=lambda c: fake)
         self.assertEqual(seen["crit"], "ALL")
+
+
+class MessageReportTests(unittest.TestCase):
+    """Každá zpráva musí nechat stopu — i ta, ze které nic nevzešlo."""
+
+    def test_message_without_attachment_is_reported(self):
+        msg = EmailMessage()
+        msg["From"] = "Dodavatel <d@x.cz>"
+        msg["Subject"] = "Faktura je v textu"
+        msg["Message-ID"] = "<abc@x.cz>"
+        msg.set_content("Fakturujeme vam 1000 Kc")
+        fake = FakeIMAP([(b"1", msg.as_bytes())])
+        result = fetch_invoice_messages(_config(), open_connection=lambda c: fake)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].attachments, ())
+        self.assertEqual(result[0].skipped, ())
+        self.assertEqual(result[0].subject, "Faktura je v textu")
+        self.assertEqual(result[0].message_id, "<abc@x.cz>")
+
+    def test_unsupported_attachment_is_reported_with_reason(self):
+        raw = _make_email("d@x.cz", "Faktura", "faktura.zip", b"PK\x03\x04",
+                          subtype="zip")
+        result = fetch_invoice_messages(_config(), open_connection=lambda c: FakeIMAP([(b"1", raw)]))
+        self.assertEqual(result[0].attachments, ())
+        self.assertEqual([(s.filename, s.reason) for s in result[0].skipped],
+                         [("faktura.zip", "extension")])
+
+    def test_too_big_attachment_is_reported(self):
+        raw = _make_email("d@x.cz", "Faktura", "velka.pdf", b"x" * 500)
+        result = fetch_invoice_messages(_config(max_bytes=100),
+                                        open_connection=lambda c: FakeIMAP([(b"1", raw)]))
+        self.assertEqual([(s.filename, s.reason) for s in result[0].skipped],
+                         [("velka.pdf", "too_big")])
+        self.assertEqual(result[0].skipped[0].size, 500)
+
+    def test_blocked_sender_is_reported_not_silently_dropped(self):
+        raw = _make_email("cizi@jinde.cz", "Reklama", "letak.pdf", b"%PDF")
+        result = fetch_invoice_messages(_config(allowed_senders=("d@x.cz",)),
+                                        open_connection=lambda c: FakeIMAP([(b"1", raw)]))
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0].sender_blocked)
+        self.assertEqual(result[0].attachments, ())
+
+    def test_mixed_message_reports_both(self):
+        msg = EmailMessage()
+        msg["From"] = "Dodavatel <d@x.cz>"
+        msg["Subject"] = "Faktura + priloha navic"
+        msg.set_content("text")
+        msg.add_attachment(b"%PDF", maintype="application", subtype="pdf",
+                           filename="faktura.pdf")
+        msg.add_attachment(b"PK", maintype="application", subtype="zip",
+                           filename="ostatni.zip")
+        result = fetch_invoice_messages(_config(), open_connection=lambda c: FakeIMAP([(b"1", msg.as_bytes())]))
+        self.assertEqual([a.filename for a in result[0].attachments], ["faktura.pdf"])
+        self.assertEqual([s.filename for s in result[0].skipped], ["ostatni.zip"])
+
+    def test_attachments_wrapper_still_works(self):
+        raw = _make_email("d@x.cz", "Faktura", "faktura.pdf", b"%PDF")
+        result = fetch_invoice_attachments(_config(), open_connection=lambda c: FakeIMAP([(b"1", raw)]))
+        self.assertEqual([a.filename for a in result], ["faktura.pdf"])
