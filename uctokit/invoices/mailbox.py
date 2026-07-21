@@ -147,14 +147,17 @@ def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) ->
             body_text = _extract_body_text(message)
 
             for part in message.walk():
-                filename = part.get_filename()
+                # Dekódovat MIME hlavičku MUSÍME PŘED kontrolou přípony. Jméno
+                # s diakritikou přijde jako "=?UTF-8?Q?Faktura_vydan=C3=A1…=2Epdf?="
+                # a to na ".pdf" nekončí — česká faktura by se tiše zahodila.
+                filename = _decode(part.get_filename() or "")
                 if not filename or not filename.lower().endswith(allowed_ext):
                     continue
                 payload = part.get_payload(decode=True) or b""
                 if not payload or len(payload) > config.max_bytes:
                     continue
                 attachments.append(FetchedAttachment(
-                    filename=_decode(filename),
+                    filename=filename,
                     content=payload,
                     sender=sender,
                     subject=subject,

@@ -98,3 +98,89 @@ class MailboxTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _make_raw_email_rfc2047(filename_encoded, subtype="pdf", body=b"%PDF-data"):
+    """Zpráva s jménem přílohy kódovaným dle RFC 2047 (=?UTF-8?Q?...?=).
+
+    Skládá se ručně: `EmailMessage.add_attachment` kóduje jména dle RFC 2231
+    (filename*=utf-8\'\'...), které `get_filename()` dekóduje samo — a reálný
+    problém by tak nešlo reprodukovat. Poštovní klienti běžně posílají obojí.
+    """
+    import base64
+    payload = base64.b64encode(body).decode()
+    return (
+        "From: Dodavatel <d@x.cz>\r\n"
+        "To: faktury@klub.cz\r\n"
+        "Subject: Faktura\r\n"
+        "MIME-Version: 1.0\r\n"
+        'Content-Type: multipart/mixed; boundary="BOUND"\r\n'
+        "\r\n"
+        "--BOUND\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Faktura v priloze\r\n"
+        "--BOUND\r\n"
+        f"Content-Type: application/{subtype}\r\n"
+        f'Content-Disposition: attachment; filename="{filename_encoded}"\r\n'
+        "Content-Transfer-Encoding: base64\r\n"
+        "\r\n"
+        f"{payload}\r\n"
+        "--BOUND--\r\n"
+    ).encode()
+
+
+class EncodedFilenameTests(unittest.TestCase):
+    """Jméno přílohy s diakritikou chodí MIME-kódované (RFC 2047).
+
+    Regrese z ostrého provozu: kontrola přípony běžela nad ZAKÓDOVANÝM jménem
+    („=?UTF-8?Q?Faktura_vydan=C3=A1…=2Eisdoc?=“), které na „.isdoc“ nekončí —
+    česká faktura se tiše zahodila a nikde se to neprojevilo.
+    """
+
+    def test_diacritics_pdf_is_accepted(self):
+        raw = _make_raw_email_rfc2047(
+            "=?UTF-8?Q?Faktura_vydan=C3=A1_Dodavatel=2D20260133=2Epdf?=")
+        result, _ = _run([(b"1", raw)], _config())
+        self.assertEqual([a.filename for a in result],
+                         ["Faktura vydaná Dodavatel-20260133.pdf"])
+
+    def test_diacritics_isdoc_is_accepted(self):
+        raw = _make_raw_email_rfc2047(
+            "=?UTF-8?Q?Faktura_vydan=C3=A1_Dodavatel=2Eisdoc?=", subtype="xml",
+            body=b"<Invoice/>")
+        result, _ = _run([(b"1", raw)], _config())
+        self.assertEqual([a.filename for a in result], ["Faktura vydaná Dodavatel.isdoc"])
+
+    def test_base64_encoded_filename(self):
+        # „DŮLEŽITÉ UPOZORNĚNÍ.pdf“ rozdělené do dvou B-slov, jak to poslal klient
+        raw = _make_raw_email_rfc2047(
+            "=?UTF-8?B?RMWuTEXFvUlUw4kgVVBPWk9STsSaTsONLnA=?= =?UTF-8?B?ZGY=?=")
+        result, _ = _run([(b"1", raw)], _config())
+        self.assertEqual([a.filename for a in result], ["DŮLEŽITÉ UPOZORNĚNÍ.pdf"])
+
+    def test_encoded_name_with_wrong_extension_still_filtered(self):
+        raw = _make_raw_email_rfc2047("=?UTF-8?Q?P=C5=99=C3=ADloh=C3=A1=2Eexe?=",
+                                      subtype="octet-stream")
+        result, _ = _run([(b"1", raw)], _config())
+        self.assertEqual(result, [])
+
+
+class SearchCriteriaTests(unittest.TestCase):
+    """Kritérium výběru zpráv jde přenastavit (kdo má vlastní deduplikaci)."""
+
+    def test_default_is_unseen(self):
+        raw = _make_email("d@x.cz", "F", "f.pdf", b"%PDF")
+        fake = FakeIMAP([(b"1", raw)])
+        seen = {}
+        fake.search = lambda charset, crit: (seen.setdefault("crit", crit), ("OK", [b"1"]))[1]
+        fetch_invoice_attachments(_config(), open_connection=lambda c: fake)
+        self.assertEqual(seen["crit"], "UNSEEN")
+
+    def test_all_criteria_is_passed_through(self):
+        raw = _make_email("d@x.cz", "F", "f.pdf", b"%PDF")
+        fake = FakeIMAP([(b"1", raw)])
+        seen = {}
+        fake.search = lambda charset, crit: (seen.setdefault("crit", crit), ("OK", [b"1"]))[1]
+        fetch_invoice_attachments(_config(search_criteria="ALL"), open_connection=lambda c: fake)
+        self.assertEqual(seen["crit"], "ALL")
