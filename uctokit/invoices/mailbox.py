@@ -34,6 +34,11 @@ class MailboxConfig:
     use_ssl: bool = True
     folder: str = "INBOX"
     mark_seen: bool = True
+    # IMAP kritérium výběru zpráv. Výchozí "UNSEEN" zpracuje jen nepřečtené,
+    # což je levné, ale křehké: kdokoli si mail otevře v poštovním klientovi
+    # (nebo ho do schránky sám přepošle), faktura se už nikdy nenačte. Kdo si
+    # nese vlastní deduplikaci, může dát "ALL" a na příznak přečtení nespoléhat.
+    search_criteria: str = "UNSEEN"
     allowed_senders: tuple[str, ...] = ()
     allowed_extensions: tuple[str, ...] = DEFAULT_EXTENSIONS
     max_bytes: int = DEFAULT_MAX_BYTES
@@ -111,7 +116,9 @@ def _open_imap(config: MailboxConfig):
 
 
 def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) -> list[FetchedAttachment]:
-    """Stáhne přílohy faktur z nepřečtených e-mailů. Vrací seznam příloh.
+    """Stáhne přílohy faktur ze schránky. Vrací seznam příloh.
+
+    Které zprávy se berou, řídí ``config.search_criteria`` (výchozí ``UNSEEN``).
 
     ``open_connection`` (kvůli testům) je callable ``(config) -> conn`` vracející
     již přihlášené a vybrané spojení; jinak se sestaví reálné IMAP spojení.
@@ -121,7 +128,7 @@ def fetch_invoice_attachments(config: MailboxConfig, *, open_connection=None) ->
     allowed_senders = tuple(s.lower() for s in config.allowed_senders)
     attachments: list[FetchedAttachment] = []
     try:
-        typ, data = conn.search(None, "UNSEEN")
+        typ, data = conn.search(None, config.search_criteria or "UNSEEN")
         uids = data[0].split() if data and data[0] else []
         for uid in uids:
             typ, msgdata = conn.fetch(uid, "(RFC822)")
