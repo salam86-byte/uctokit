@@ -166,3 +166,21 @@ class TaxPointGroundingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClippedLabelTests(unittest.TestCase):
+    """Popisek uříznutý šířkou políčka — na skenech běžné."""
+
+    def _taxable(self, text: str):
+        return heuristics.extract_from_text(text).taxable_date.value
+
+    def test_label_cut_off_by_the_box(self):
+        # „Datum usk. zd. plně" — políčko uřízlo konec slova, a hned vedle
+        # je řádek s datem vystavení, který se nesmí vzít místo něj.
+        text = ("Datum vystavení 5.3.2026 "
+                "Datum usk. zd. plně 28.2.2026 "
+                "Datum splatnosti 19.3.2026")
+        self.assertEqual(self._taxable(text), date(2026, 2, 28))
+
+    def test_still_ignores_unrelated_fulfilment(self):
+        self.assertIsNone(self._taxable("plně automatický režim 15. 6. 2026"))

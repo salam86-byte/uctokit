@@ -52,13 +52,16 @@ def strip_diacritics(text: str) -> str:
 #     Datum zdanit. plnění                  — zkrácený přívlastek
 #     Datum uskutečnění plnění              — bez „zdanitelného"
 #     Datum uskutecneni zdanitelneho plneni — bez diakritiky
+#     Datum usk. zd. plně                   — popisek uříznutý políčkem
 #     DUZP / Dat. usk. zdan. plnění
 #
-# Proto se hledá nad textem BEZ diakritiky a „zdanitelného" je nepovinné.
+# Proto se hledá nad textem BEZ diakritiky, „zdanitelného" je nepovinné
+# a podstatné jméno smí být uříznuté (`pln` + zbytek do hranice slova).
 # Samotné „plnění" bez uvozujícího „datum" se nechytá — to je i ve větách
 # typu „plnění dle smlouvy".
 _TAXABLE_DATE_RE = re.compile(
-    r"(?:dat(?:um)?\.?\s*(?:usk(?:utecneni)?\.?\s*)?(?:zdan\w*\.?\s*)?plneni"
+    r"(?:dat(?:um)?\.?\s*(?:usk(?:utecneni)?\.?\s*)?(?:zd(?:an\w*)?\.?\s*)?"
+    r"pln(?:eni|en|e)\b"
     r"|\bDUZP\b|\bDUPZ\b)"
     r"\D{0,12}" + _DATE_VALUE,
     re.IGNORECASE,
