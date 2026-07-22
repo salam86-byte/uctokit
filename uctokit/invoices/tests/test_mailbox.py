@@ -142,10 +142,10 @@ class EncodedFilenameTests(unittest.TestCase):
 
     def test_diacritics_pdf_is_accepted(self):
         raw = _make_raw_email_rfc2047(
-            "=?UTF-8?Q?Faktura_vydan=C3=A1_Dodavatel=2D20260133=2Epdf?=")
+            "=?UTF-8?Q?Faktura_vydan=C3=A1_Dodavatel=2D2026=2D0133=2Epdf?=")
         result, _ = _run([(b"1", raw)], _config())
         self.assertEqual([a.filename for a in result],
-                         ["Faktura vydaná Dodavatel-20260133.pdf"])
+                         ["Faktura vydaná Dodavatel-2026-0133.pdf"])
 
     def test_diacritics_isdoc_is_accepted(self):
         raw = _make_raw_email_rfc2047(
