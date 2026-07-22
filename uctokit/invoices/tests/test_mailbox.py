@@ -23,14 +23,18 @@ class FakeIMAP:
     def __init__(self, messages):
         self.messages = messages  # [(uid_bytes, raw_bytes)]
         self.seen = []
+        self.fetch_specs = []     # čím se volalo FETCH — kontrola PEEK varianty
 
     def search(self, charset, criterion):
         return "OK", [b" ".join(uid for uid, _ in self.messages)]
 
     def fetch(self, uid, spec):
+        self.fetch_specs.append(spec)
         for u, raw in self.messages:
             if u == uid:
-                return "OK", [(b"1 (RFC822)", raw)]
+                # Reálný server na BODY.PEEK[] vrací popis s klíčem BODY[]
+                # (PEEK je jen modifikátor čtení, v odpovědi není).
+                return "OK", [(b"1 (BODY[] {%d}" % len(raw), raw)]
         return "NO", [None]
 
     def store(self, uid, flags, value):
@@ -96,6 +100,41 @@ class MailboxTests(unittest.TestCase):
         raw = _make_email("d@x.cz", "Faktura", "faktura.pdf", b"%PDF")
         _, fake = _run([(b"1", raw)], _config(mark_seen=True))
         self.assertIn(b"1", fake.seen)
+
+
+class PeekTests(unittest.TestCase):
+    """Čtení nesmí mít vedlejší efekt na serveru.
+
+    FETCH RFC822 podle RFC 3501 implicitně nastaví \\Seen, takže by
+    `mark_seen=False` bylo fakticky no-op — na sdílené schránce by četba
+    označovala poštu přečtenou lidem pod rukama. Fetchuje se proto
+    BODY.PEEK[] a o příznak se stará výhradně explicitní STORE (`_mark_seen`).
+    """
+
+    def test_fetch_uses_body_peek(self):
+        raw = _make_email("d@x.cz", "Faktura", "faktura.pdf", b"%PDF")
+        _, fake = _run([(b"1", raw)], _config())
+        self.assertTrue(fake.fetch_specs, "FETCH se vůbec nezavolal")
+        for spec in fake.fetch_specs:
+            self.assertIn("BODY.PEEK[]", spec)
+            self.assertNotIn("RFC822", spec)
+
+    def test_no_store_when_mark_seen_false(self):
+        raw = _make_email("d@x.cz", "Faktura", "faktura.pdf", b"%PDF")
+        result, fake = _run([(b"1", raw)], _config(mark_seen=False))
+        self.assertEqual(len(result), 1)          # zpráva se přesto přečetla
+        self.assertEqual(fake.seen, [])           # ale žádný STORE \Seen
+
+    def test_blocked_sender_still_not_stored_when_mark_seen_false(self):
+        """Ani zablokovaný odesílatel se nesmí označit přečteným, když se
+        označování vyplo — jinak by `mark_seen=False` mělo skulinu."""
+        raw = _make_email("cizi@jinde.cz", "Reklama", "letak.pdf", b"%PDF")
+        fake = FakeIMAP([(b"1", raw)])
+        fetch_invoice_messages(
+            _config(mark_seen=False, allowed_senders=("d@x.cz",)),
+            open_connection=lambda c: fake,
+        )
+        self.assertEqual(fake.seen, [])
 
 
 if __name__ == "__main__":

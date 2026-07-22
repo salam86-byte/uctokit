@@ -128,7 +128,12 @@ def _extract_body_text(message, *, max_chars: int = 20000) -> str:
 
 
 def _raw_message(msgdata) -> bytes | None:
-    """Vytáhne RFC822 bajty z odpovědi IMAP fetch (různě zanořené tuply)."""
+    """Vytáhne surové bajty zprávy z odpovědi IMAP FETCH (různě zanořené tuply).
+
+    Fetchujeme přes ``BODY.PEEK[]`` (dřív ``RFC822``), takže popisný klíč
+    v odpovědi je ``BODY[]``, ne ``RFC822``. Na klíči tady nezáleží — samotná
+    data zprávy jsou vždy druhý prvek tuplu ``(popis, bajty)`` a hledáme je
+    podle typu (bytes), ne podle jména pole. Funguje proto pro obě varianty."""
     if not msgdata:
         return None
     for item in msgdata:
@@ -165,7 +170,12 @@ def fetch_invoice_messages(config: MailboxConfig, *, open_connection=None) -> li
         uids = data[0].split() if data and data[0] else []
         for uid in uids:
             uid_str = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
-            typ, msgdata = conn.fetch(uid, "(RFC822)")
+            # BODY.PEEK[], ne RFC822: prosté FETCH RFC822 podle RFC 3501
+            # implicitně nastaví \Seen na serveru, takže volba `mark_seen=False`
+            # by byla no-op a na sdílené schránce by četba označovala poštu
+            # přečtenou lidem pod rukama. PEEK čte bez vedlejšího efektu;
+            # o příznak se pak stará výhradně `_mark_seen()`.
+            typ, msgdata = conn.fetch(uid, "(BODY.PEEK[])")
             raw = _raw_message(msgdata)
             if not raw:
                 # I nečitelná zpráva musí být vidět, ať se neztratí beze stopy.
