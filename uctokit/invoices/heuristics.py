@@ -49,9 +49,9 @@ def strip_diacritics(text: str) -> str:
 # kde chce a část dodavatelů píše bez diakritiky. Ověřeno na skutečných
 # fakturách, každá varianta se opravdu vyskytla:
 #
-#     Datum zdanit. plnění                
-#     Datum uskutečnění plnění            (Čerpací karty) — bez „zdanitelného"
-#     Datum uskutecneni zdanitelneho plneni   — bez diakritiky
+#     Datum zdanit. plnění                  — zkrácený přívlastek
+#     Datum uskutečnění plnění              — bez „zdanitelného"
+#     Datum uskutecneni zdanitelneho plneni — bez diakritiky
 #     DUZP / Dat. usk. zdan. plnění
 #
 # Proto se hledá nad textem BEZ diakritiky a „zdanitelného" je nepovinné.

@@ -110,7 +110,7 @@ class RealWorldWordingTests(unittest.TestCase):
         return heuristics.extract_from_text(text).taxable_date.value
 
     def test_without_the_word_zdanitelneho(self):
-        # Čerpací karty: „uskutečnění plnění" bez „zdanitelného".
+        # Varianta z praxe: „uskutečnění plnění" bez „zdanitelného".
         self.assertEqual(
             self._taxable("Datum splatnosti: 05.08.2026 "
                           "Datum uskutečnění plnění: 30.06.2026 Forma úhrady"),
