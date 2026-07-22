@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uctokit"
-version = "0.2.0"
+version = "0.2.1"
 description = "Frameworkově neutrální jádro pro zpracování přijatých faktur, plateb (Fio) a registrů (ARES/MFČR). Čistý Python, bez závislosti na web frameworku."
 readme = "README.md"
 requires-python = ">=3.10"

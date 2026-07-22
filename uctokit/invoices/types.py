@@ -75,6 +75,11 @@ class SourceDocument:
     def looks_like_xlsx(self) -> bool:
         return self.suffix == "xlsx" or "spreadsheetml" in (self.media_type or "")
 
+    @property
+    def looks_like_xls(self) -> bool:
+        """Starý binární Excel (97–2003). Čte se jinou knihovnou než xlsx."""
+        return self.suffix == "xls" or "ms-excel" in (self.media_type or "")
+
 
 # --- Výstup ------------------------------------------------------------------
 

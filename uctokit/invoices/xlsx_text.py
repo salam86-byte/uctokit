@@ -66,3 +66,61 @@ def _format_has_decimals(number_format: str) -> bool:
 
     fmt = re.sub(r'"[^"]*"', "", number_format or "")
     return bool(re.search(r"[.,]0{2,}", fmt))
+
+
+def extract_text_xls(content: bytes, *, max_rows: int = 400) -> str:
+    """Totéž pro STARÝ binární `.xls` (Excel 97–2003, OLE2).
+
+    openpyxl umí jen `.xlsx`, takže se sáhne po `xlrd` (moderní verze čte
+    naopak výhradně `.xls`). Import je líný — bez knihovny se vrátí prázdno
+    a pipeline spadne zpět, žádná tvrdá závislost.
+
+    Datum je v `.xls` uložené jako pořadové číslo (17. 1. 2026 = 46039).
+    Bez převodu by se do textu dostalo „46039" a extrakce by z toho datum
+    nikdy nedostala — proto se datové buňky poznají podle typu a přeloží.
+    """
+    try:
+        import xlrd
+    except ImportError:
+        return ""
+    try:
+        wb = xlrd.open_workbook(file_contents=content)
+    except Exception:
+        return ""
+
+    lines: list[str] = []
+    for sheet in wb.sheets():
+        if wb.nsheets > 1:
+            lines.append(f"# List: {sheet.name}")
+        for row_idx in range(min(sheet.nrows, max_rows)):
+            cells = []
+            for col_idx in range(sheet.ncols):
+                cell = sheet.cell(row_idx, col_idx)
+                text = _fmt_xls(cell, wb.datemode, xlrd)
+                if text:
+                    cells.append(text)
+            if cells:
+                lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
+def _fmt_xls(cell, datemode, xlrd) -> str:
+    """Buňka `.xls` na text — datum z pořadového čísla, čísla bez koncových nul."""
+    from datetime import date, datetime
+
+    if cell.ctype == xlrd.XL_CELL_EMPTY:
+        return ""
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        try:
+            y, m, d, hh, mm, ss = xlrd.xldate_as_tuple(cell.value, datemode)
+        except Exception:
+            return str(cell.value).strip()
+        if (hh, mm, ss) == (0, 0, 0):
+            return date(y, m, d).isoformat()
+        return datetime(y, m, d, hh, mm, ss).isoformat(sep=" ")
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return "ano" if cell.value else "ne"
+    if cell.ctype == xlrd.XL_CELL_NUMBER:
+        value = float(cell.value)
+        return str(int(value)) if value.is_integer() else f"{value:g}"
+    return str(cell.value).strip()

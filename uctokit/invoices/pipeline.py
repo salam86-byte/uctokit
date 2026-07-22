@@ -99,8 +99,9 @@ def _run_ladder(document, config, llm) -> ExtractionResult:
         return _from_scan(document, raw_text, extractor, config)
 
     # Tabulková faktura (XLSX) – sešit zploštíme na text a jedeme textovou cestou.
-    if document.looks_like_xlsx:
-        raw_text = _xlsx.extract_text(content)
+    if document.looks_like_xlsx or document.looks_like_xls:
+        raw_text = (_xlsx.extract_text_xls(content) if document.looks_like_xls
+                    else _xlsx.extract_text(content))
         return _from_text(
             raw_text, extractor, config,
             heur_source=SOURCE_HEURISTIC,

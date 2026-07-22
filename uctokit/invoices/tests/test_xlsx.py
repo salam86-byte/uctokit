@@ -1,5 +1,6 @@
 """Testy extrakce z tabulkové faktury (XLSX)."""
 
+import datetime
 import io
 import unittest
 from datetime import date
@@ -90,6 +91,44 @@ class XlsxPipelineTests(unittest.TestCase):
         self.assertEqual(inv.issue_date.value, date(2026, 3, 17))
         self.assertEqual(inv.due_date.value, date(2026, 3, 27))
 
+
+
+class XlsTests(unittest.TestCase):
+    """Starý binární .xls (Excel 97–2003) — čte se xlrd, ne openpyxl."""
+
+    def _workbook(self):
+        """Sešit s textem, číslem a DATEM uloženým jako pořadové číslo."""
+        xlwt = __import__("xlwt")
+        wb = xlwt.Workbook()
+        ws = wb.add_sheet("List1")
+        date_style = xlwt.XFStyle()
+        date_style.num_format_str = "DD.MM.YYYY"
+        ws.write(0, 0, "FAKTURA")
+        ws.write(1, 0, "Faktura č.:")
+        ws.write(1, 1, 25003)
+        ws.write(2, 0, "Den splatnosti:")
+        ws.write(2, 1, datetime.date(2026, 1, 17), date_style)
+        ws.write(3, 0, "K úhradě celkem:")
+        ws.write(3, 1, 650.0)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def test_reads_text_numbers_and_dates(self):
+        try:
+            import xlwt  # noqa: F401
+        except ImportError:
+            self.skipTest("xlwt není k dispozici (jen pro sestavení testovacího .xls)")
+        text = xlsx_text.extract_text_xls(self._workbook())
+        self.assertIn("FAKTURA", text)
+        self.assertIn("25003", text)
+        self.assertIn("650", text)
+        # Datum MUSÍ být datum, ne pořadové číslo 46039 — jinak ho extrakce nenajde.
+        self.assertIn("2026-01-17", text)
+        self.assertNotIn("46039", text)
+
+    def test_broken_file_returns_empty(self):
+        self.assertEqual(xlsx_text.extract_text_xls(b"tohle neni xls"), "")
 
 if __name__ == "__main__":
     unittest.main()
