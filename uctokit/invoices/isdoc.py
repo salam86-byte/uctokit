@@ -6,6 +6,7 @@ Strukturální parse: co je v ISDOC uvedené, bereme 1:1 s vysokou jistotou.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from decimal import Decimal
 
 from . import validators as V
@@ -25,19 +26,43 @@ def _field(value, *, raw=None) -> Field:
     return Field(value=value, confidence=ISDOC_CONFIDENCE, source=SOURCE_ISDOC, raw=raw)
 
 
-def parse_totals(content: bytes) -> tuple[Decimal | None, Decimal | None]:
-    """Vrátí ``(celkem s DPH, zbývá uhradit)``. ``None`` = v dokladu není.
+@dataclass(frozen=True)
+class IsdocAmounts:
+    """Částky z ``LegalMonetaryTotal``. ``None`` = doklad je neuvádí.
 
-    Vyúčtovací faktura s odpočtem zálohy nese v ``LegalMonetaryTotal`` obě
-    čísla: ``TaxInclusiveAmount`` je celková hodnota dokladu, ``PayableAmount``
-    to, co po odpočtu zbývá zaplatit – a to bývá nula. Kdo si přečte jen
-    ``PayableAmount``, dostane fakturu na 72 tisíc, která vypadá jako prázdná;
-    kdo jen ``TaxInclusiveAmount``, zaplatí zálohu podruhé.
+    ``total`` je hodnota dokladu s DPH, ``payable`` to, co se má reálně poslat.
+    Liší se ze **dvou různých důvodů** a splést si je stojí peníze:
+
+    * odpočet zálohy (``deposit``) → ``payable`` je nižší, klidně nula;
+    * zaokrouhlení (``rounding``) → ``payable`` je o pár haléřů vyšší.
+
+    Kdo bere jen ``payable``, udělá z vyúčtovací faktury prázdný doklad; kdo
+    jen ``total``, zaplatí zálohu podruhé; a kdo považuje každý rozdíl za
+    zálohu, vyděsí účetní kvůli 34 haléřům zaokrouhlení.
     """
+
+    total: Decimal | None = None
+    payable: Decimal | None = None
+    deposit: Decimal | None = None
+    rounding: Decimal | None = None
+
+    @property
+    def has_deposit(self) -> bool:
+        """Byla na dokladu odečtena záloha (ne jen zaokrouhleno)?"""
+        return bool(self.deposit and self.deposit > 0)
+
+    @property
+    def to_pay(self) -> Decimal | None:
+        """Částka k odeslání do banky – ``payable``, jinak hodnota dokladu."""
+        return self.payable if self.payable is not None else self.total
+
+
+def parse_amounts(content: bytes) -> IsdocAmounts:
+    """Vytáhne z ISDOC částky včetně zálohy a zaokrouhlení."""
     try:
         root = ET.fromstring(content)
     except ET.ParseError:
-        return None, None
+        return IsdocAmounts()
 
     for el in root.iter():
         if _localname(el.tag) != "LegalMonetaryTotal":
@@ -47,13 +72,26 @@ def parse_totals(content: bytes) -> tuple[Decimal | None, Decimal | None]:
         def amount(name):
             return V.normalize_amount(values.get(name))
 
-        # `Difference…` je totéž co `PayableAmount`, jen jiným jménem (starší
-        # verze ISDOC a některé účetní systémy plní jen jedno z nich).
         payable = amount("PayableAmount")
         if payable is None:
+            # Starší verze ISDOC a část účetních systémů plní jen tohle.
             payable = amount("DifferenceTaxInclusiveAmount")
-        return amount("TaxInclusiveAmount"), payable
-    return None, None
+        deposit = amount("AlreadyClaimedTaxInclusiveAmount")
+        if not deposit:
+            deposit = amount("PaidDepositsAmount")
+        return IsdocAmounts(
+            total=amount("TaxInclusiveAmount"),
+            payable=payable,
+            deposit=deposit,
+            rounding=amount("PayableRoundingAmount"),
+        )
+    return IsdocAmounts()
+
+
+def parse_totals(content: bytes) -> tuple[Decimal | None, Decimal | None]:
+    """Vrátí ``(celkem s DPH, zbývá uhradit)``. Zkratka nad :func:`parse_amounts`."""
+    amounts = parse_amounts(content)
+    return amounts.total, amounts.payable
 
 
 def parse_isdoc(content: bytes) -> ExtractedInvoice | None:

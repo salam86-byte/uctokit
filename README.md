@@ -41,3 +41,20 @@ pytest
 ```
 
 Testy jsou čistě `unittest`/`pytest` a běží **bez** jakéhokoli web frameworku.
+
+### Testovací data: žádné reálné doklady
+
+Repo je veřejné a knihovna se vyvíjí nad skutečnými fakturami. Do testů, fixtur,
+komentářů ani commit zpráv proto **nesmí** nic z nich:
+
+- názvy firem a jména osob (ani jako „ukázka, jak to píše dodavatel X“),
+- IČO, DIČ, čísla účtů, IBANy, variabilní symboly a čísla dokladů,
+- adresy, telefony, e-maily,
+- celé PDF/ISDOC soubory přijaté od dodavatelů.
+
+Použij vymyšlené hodnoty. Když test potřebuje **platné** IČO nebo IBAN, vygeneruj
+si takové, které projde kontrolním součtem – v repu se drží `12345679` (IČO,
+mod 11) a účty postavené na `1111111111` (mod 11 i mod 97 IBAN).
+
+Když je potřeba zaznamenat, že nějaký tvar zápisu se v praxi opravdu vyskytl,
+popiš **tvar**, ne dodavatele: `# bez diakritiky`, ne `# takhle to píše firma X`.

@@ -183,3 +183,42 @@ class MergeValidatorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DescribeLlmFailureTests(unittest.TestCase):
+    """Když AI vypadne, musí být z hlášky poznat CO opravit."""
+
+    class _Endpoint:
+        model = "qwen-text"
+        base_url = "http://10.0.0.1:8000/v1"
+
+    class _Extractor:
+        endpoint = None
+
+    def _extractor(self, endpoint):
+        ex = self._Extractor()
+        ex.endpoint = endpoint
+        return ex
+
+    def test_names_model_and_endpoint(self):
+        from uctokit.invoices.pipeline import describe_llm_failure
+
+        msg = describe_llm_failure(
+            self._extractor(self._Endpoint()), TimeoutError("read timed out")
+        )
+        self.assertIn("qwen-text", msg)
+        self.assertIn("10.0.0.1:8000", msg)
+        self.assertIn("read timed out", msg)
+        self.assertIn("TimeoutError", msg)
+
+    def test_survives_extractor_without_endpoint(self):
+        from uctokit.invoices.pipeline import describe_llm_failure
+
+        msg = describe_llm_failure(self._extractor(None), ValueError("bum"))
+        self.assertIn("ValueError", msg)
+        self.assertIn("bum", msg)
+
+    def test_exception_without_message(self):
+        from uctokit.invoices.pipeline import describe_llm_failure
+
+        self.assertIn("RuntimeError", describe_llm_failure(None, RuntimeError()))

@@ -178,6 +178,25 @@ def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResul
 
 # --- Dílčí cesty -------------------------------------------------------------
 
+def describe_llm_failure(extractor, exc: Exception) -> str:
+    """Proč AI nedojela – i s modelem a adresou endpointu.
+
+    Bez tohohle zbyde po výpadku modelu jen „selhalo“ a nikdo nepozná, jestli
+    restartovat server, prodloužit timeout, nebo opravit název modelu. Doklad
+    se přitom uloží vytěžený jen heuristikami a tváří se hotově.
+    """
+    endpoint = getattr(extractor, "endpoint", None)
+    if endpoint is None:
+        endpoint = getattr(getattr(extractor, "provider", None), "endpoint", None)
+    where = ""
+    if endpoint is not None:
+        model = getattr(endpoint, "model", "") or "?"
+        url = getattr(endpoint, "base_url", "") or "?"
+        where = f" ({model} na {url})"
+    detail = str(exc).strip() or type(exc).__name__
+    return f"{type(exc).__name__}{where}: {detail[:200]}"
+
+
 def _from_text(
     raw_text, extractor, config, *, heur_source, method_with_llm, method_plain,
 ) -> ExtractionResult:
@@ -189,8 +208,11 @@ def _from_text(
         try:
             llm_inv = extractor.from_text(raw_text)
             llm_used = any(f.is_present for _, f in llm_inv.items())
-        except Exception:
-            warnings.append("LLM extrakce z textu selhala – použity heuristiky.")
+        except Exception as exc:
+            warnings.append(
+                "LLM extrakce z textu selhala – použity heuristiky. "
+                + describe_llm_failure(extractor, exc)
+            )
 
     merged, merge_warnings = _merge(llm_inv, heur)
     warnings.extend(merge_warnings)
@@ -226,8 +248,11 @@ def _from_scan(document, raw_text, extractor, config) -> ExtractionResult:
                         warnings=warnings,
                         raw_text=raw_text or None,
                     )
-            except Exception:
-                warnings.append("Vision extrakce selhala – zkouším OCR.")
+            except Exception as exc:
+                warnings.append(
+                    "Vision extrakce selhala – zkouším OCR. "
+                    + describe_llm_failure(extractor, exc)
+                )
 
     # b) OCR → textová cesta.
     if config.enable_ocr:
@@ -263,8 +288,11 @@ def _from_image(document, extractor, config) -> ExtractionResult:
                     overall_confidence=overall_confidence(vis),
                     warnings=warnings,
                 )
-        except Exception:
-            warnings.append("Vision extrakce z obrázku selhala – zkouším OCR.")
+        except Exception as exc:
+            warnings.append(
+                "Vision extrakce z obrázku selhala – zkouším OCR. "
+                + describe_llm_failure(extractor, exc)
+            )
 
     if config.enable_ocr:
         ocr_text = _ocr.ocr_image(document.content)

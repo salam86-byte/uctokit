@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from uctokit.invoices.isdoc import parse_isdoc, parse_totals
+from uctokit.invoices.isdoc import parse_amounts, parse_isdoc, parse_totals
 
 ISDOC_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
@@ -41,6 +41,56 @@ SETTLEMENT_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
     <PayableAmount>0.00</PayableAmount>
   </LegalMonetaryTotal>
 </Invoice>"""
+
+
+# Běžná faktura BEZ zálohy, kde se jen zaokrouhluje na celé koruny:
+# 4812.66 + 0.34 = 4813. Rozdíl mezi `total` a `payable` tu NENÍ záloha.
+ROUNDED_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
+  <ID>2026-0170</ID>
+  <IssueDate>2026-05-20</IssueDate>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>4309.94</TaxExclusiveAmount>
+    <TaxInclusiveAmount>4812.66</TaxInclusiveAmount>
+    <AlreadyClaimedTaxInclusiveAmount>0</AlreadyClaimedTaxInclusiveAmount>
+    <DifferenceTaxInclusiveAmount>4812.66</DifferenceTaxInclusiveAmount>
+    <PayableRoundingAmount>0.34</PayableRoundingAmount>
+    <PaidDepositsAmount>0</PaidDepositsAmount>
+    <PayableAmount>4813</PayableAmount>
+  </LegalMonetaryTotal>
+</Invoice>"""
+
+
+class ParseAmountsTests(unittest.TestCase):
+    def test_deposit_is_recognised(self):
+        amounts = parse_amounts(SETTLEMENT_SAMPLE)
+        self.assertEqual(amounts.total, Decimal("72721.00"))
+        self.assertEqual(amounts.payable, Decimal("0.00"))
+        self.assertEqual(amounts.deposit, Decimal("72721.00"))
+        self.assertTrue(amounts.has_deposit)
+
+    def test_rounding_is_not_a_deposit(self):
+        """Zaokrouhlení o 34 haléřů nesmí vypadat jako odečtená záloha."""
+        amounts = parse_amounts(ROUNDED_SAMPLE)
+        self.assertEqual(amounts.total, Decimal("4812.66"))
+        self.assertEqual(amounts.payable, Decimal("4813.00"))
+        self.assertEqual(amounts.rounding, Decimal("0.34"))
+        self.assertFalse(amounts.has_deposit)
+
+    def test_to_pay_prefers_payable(self):
+        self.assertEqual(parse_amounts(ROUNDED_SAMPLE).to_pay, Decimal("4813.00"))
+
+    def test_to_pay_falls_back_to_total(self):
+        xml = ROUNDED_SAMPLE.replace(b"<PayableAmount>4813</PayableAmount>", b"")
+        amounts = parse_amounts(xml)
+        self.assertEqual(amounts.payable, Decimal("4812.66"))  # z Difference…
+        self.assertEqual(amounts.to_pay, Decimal("4812.66"))
+
+    def test_document_without_amounts(self):
+        amounts = parse_amounts(ISDOC_SAMPLE)
+        self.assertIsNone(amounts.total)
+        self.assertFalse(amounts.has_deposit)
+        self.assertIsNone(amounts.to_pay)
 
 
 class ParseTotalsTests(unittest.TestCase):
