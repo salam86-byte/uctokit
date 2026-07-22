@@ -6,6 +6,7 @@ Strukturální parse: co je v ISDOC uvedené, bereme 1:1 s vysokou jistotou.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from decimal import Decimal
 
 from . import validators as V
 from .types import Field, ExtractedInvoice, SOURCE_ISDOC
@@ -22,6 +23,37 @@ def _field(value, *, raw=None) -> Field:
     if value in (None, ""):
         return Field()
     return Field(value=value, confidence=ISDOC_CONFIDENCE, source=SOURCE_ISDOC, raw=raw)
+
+
+def parse_totals(content: bytes) -> tuple[Decimal | None, Decimal | None]:
+    """Vrátí ``(celkem s DPH, zbývá uhradit)``. ``None`` = v dokladu není.
+
+    Vyúčtovací faktura s odpočtem zálohy nese v ``LegalMonetaryTotal`` obě
+    čísla: ``TaxInclusiveAmount`` je celková hodnota dokladu, ``PayableAmount``
+    to, co po odpočtu zbývá zaplatit – a to bývá nula. Kdo si přečte jen
+    ``PayableAmount``, dostane fakturu na 72 tisíc, která vypadá jako prázdná;
+    kdo jen ``TaxInclusiveAmount``, zaplatí zálohu podruhé.
+    """
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return None, None
+
+    for el in root.iter():
+        if _localname(el.tag) != "LegalMonetaryTotal":
+            continue
+        values = {_localname(c.tag): (c.text or "").strip() for c in el}
+
+        def amount(name):
+            return V.normalize_amount(values.get(name))
+
+        # `Difference…` je totéž co `PayableAmount`, jen jiným jménem (starší
+        # verze ISDOC a některé účetní systémy plní jen jedno z nich).
+        payable = amount("PayableAmount")
+        if payable is None:
+            payable = amount("DifferenceTaxInclusiveAmount")
+        return amount("TaxInclusiveAmount"), payable
+    return None, None
 
 
 def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
@@ -56,7 +88,14 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
     supplier = subtree("AccountingSupplierParty")
     raw_ico = first("ID", supplier)
     raw_iban = first("IBAN")
+    # Celková částka je `TaxInclusiveAmount`, ne `PayableAmount` – to je u
+    # vyúčtovací faktury zbytek po odpočtu zálohy (klidně nula). Doklady bez
+    # `LegalMonetaryTotal` (starší tvar `InvoiceSummary`) čteme jako dřív.
     raw_amount = first("PayableAmount")
+    total, payable = parse_totals(content)
+    amount = total if total is not None else payable
+    if amount is None:
+        amount = V.normalize_amount(raw_amount)
 
     # Číslo účtu z platebních údajů (Details: <ID> účet + <BankCode>).
     account = ""
@@ -76,8 +115,8 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
         supplier_ico=_field(V.normalize_ico(raw_ico) if raw_ico else None, raw=raw_ico),
         supplier_iban=_field(V.normalize_iban(raw_iban) if raw_iban else None, raw=raw_iban),
         supplier_account=_field(V.normalize_account(account) if account else None, raw=account or None),
-        total_amount=_field(V.normalize_amount(raw_amount), raw=raw_amount),
-        currency=_field(first("CurrencyCode") or ("CZK" if raw_amount else None)),
+        total_amount=_field(amount, raw=raw_amount),
+        currency=_field(first("CurrencyCode") or ("CZK" if amount is not None else None)),
         variable_symbol=_field(first("VariableSymbol")),
         invoice_number=_field(invoice_number or None),
         issue_date=_field(V.normalize_date(first("IssueDate")), raw=first("IssueDate")),

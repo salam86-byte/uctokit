@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from uctokit.invoices.isdoc import parse_isdoc
+from uctokit.invoices.isdoc import parse_isdoc, parse_totals
 
 ISDOC_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
@@ -21,6 +21,50 @@ ISDOC_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
   </Payment></PaymentMeans>
   <InvoiceSummary><PayableAmount>13000.00</PayableAmount></InvoiceSummary>
 </Invoice>"""
+
+
+# Vyúčtovací faktura: hodnota dokladu 72 721, ale záloha už je zaplacená,
+# takže k úhradě zbývá nula. Obě čísla musí přežít.
+SETTLEMENT_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
+  <ID>2026-0133</ID>
+  <IssueDate>2026-05-31</IssueDate>
+  <AccountingSupplierParty><Party>
+    <PartyIdentification><ID>12345679</ID></PartyIdentification>
+    <PartyName><Name>Vzorovy dodavatel a.s.</Name></PartyName>
+  </Party></AccountingSupplierParty>
+  <LegalMonetaryTotal>
+    <TaxExclusiveAmount>60100.00</TaxExclusiveAmount>
+    <TaxInclusiveAmount>72721.00</TaxInclusiveAmount>
+    <AlreadyClaimedTaxInclusiveAmount>72721.00</AlreadyClaimedTaxInclusiveAmount>
+    <DifferenceTaxInclusiveAmount>0.00</DifferenceTaxInclusiveAmount>
+    <PayableAmount>0.00</PayableAmount>
+  </LegalMonetaryTotal>
+</Invoice>"""
+
+
+class ParseTotalsTests(unittest.TestCase):
+    def test_settlement_invoice_keeps_both_amounts(self):
+        total, payable = parse_totals(SETTLEMENT_SAMPLE)
+        self.assertEqual(total, Decimal("72721.00"))
+        self.assertEqual(payable, Decimal("0.00"))
+
+    def test_total_amount_is_not_the_payable_zero(self):
+        """Doklad na 72 tisíc nesmí vypadat jako prázdný."""
+        inv = parse_isdoc(SETTLEMENT_SAMPLE)
+        self.assertEqual(inv.total_amount.value, Decimal("72721.00"))
+
+    def test_difference_used_when_payable_missing(self):
+        xml = SETTLEMENT_SAMPLE.replace(b"<PayableAmount>0.00</PayableAmount>", b"")
+        total, payable = parse_totals(xml)
+        self.assertEqual(total, Decimal("72721.00"))
+        self.assertEqual(payable, Decimal("0.00"))
+
+    def test_without_legal_monetary_total_returns_nothing(self):
+        self.assertEqual(parse_totals(ISDOC_SAMPLE), (None, None))
+
+    def test_invalid_bytes_return_nothing(self):
+        self.assertEqual(parse_totals(b"not xml"), (None, None))
 
 
 class ParseIsdocTests(unittest.TestCase):
