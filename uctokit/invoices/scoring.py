@@ -11,9 +11,27 @@ from __future__ import annotations
 from decimal import Decimal
 
 from . import validators as V
-from .types import ExtractedInvoice
+from .heuristics import strip_diacritics
+from .types import SOURCE_LLM, SOURCE_VISION, ExtractedInvoice
 
 _MIN, _MAX = 0.05, 0.99
+
+# Slova, kterými faktura mluví o datu plnění. Hledá se v textu bez diakritiky
+# A BEZ MEZER — část PDF má písmena proložená („d a tu m u s ku te č n ěn í
+# pl ně n í“), takže na mezery se spolehnout nedá.
+_TAX_POINT_MARKERS = ("plneni", "duzp", "dupz", "deliverydate", "taxpointdate",
+                      "dateofsupply")
+
+
+def mentions_tax_point(raw_text: str) -> bool:
+    """Zmiňuje doklad vůbec datum plnění?
+
+    Schválně velkoryse: je to podlaha proti vymýšlení, ne důkaz. Když
+    v dokladu není o plnění ani slovo, nemohl z něj model žádné DUZP
+    přečíst — ať už napíše cokoli.
+    """
+    norm = strip_diacritics(raw_text or "").lower()
+    return any(marker in "".join(norm.split()) for marker in _TAX_POINT_MARKERS)
 
 
 def _clamp(x: float) -> float:
@@ -55,6 +73,19 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
         elif name == "variable_symbol":
             in_text = V.token_in_text(str(f.value), raw_text)
             f.confidence = _clamp(base + (0.15 if in_text else 0.0))
+
+        elif name == "taxable_date" and f.source in (SOURCE_LLM, SOURCE_VISION) \
+                and raw_text and not mentions_tax_point(raw_text):
+            # Model dopisuje DUZP i tam, kde ho doklad vůbec nemá — typicky
+            # opíše datum vystavení. Pokyn v promptu na to nestačil (ověřeno
+            # na dvou fakturách, kde v textu není o plnění ani slovo), a
+            # vymyšlené datum plnění posouvá DPH do jiného období. Radši
+            # prázdno: účetní ho doplní, když ho na papíře vidí.
+            warnings.append(
+                f"Datum zdanitelného plnění '{f.value}' doklad neuvádí — "
+                f"model si ho domyslel, proto se nepoužilo."
+            )
+            f.value, f.raw, f.confidence = None, None, 0.0
 
         elif name in ("issue_date", "taxable_date", "due_date"):
             ok = V.date_sane(f.value)

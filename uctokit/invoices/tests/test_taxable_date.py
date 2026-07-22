@@ -8,8 +8,10 @@ z faktury doplní datem pořízení, což přes přelom měsíce znamená daň v
 import unittest
 from datetime import date
 
-from uctokit.invoices import heuristics, isdoc, qr
-from uctokit.invoices.types import FIELD_NAMES
+from uctokit.invoices import heuristics, isdoc, qr, scoring
+from uctokit.invoices.types import (
+    FIELD_NAMES, SOURCE_ISDOC, SOURCE_LLM, ExtractedInvoice, Field,
+)
 
 
 class FieldContractTests(unittest.TestCase):
@@ -95,6 +97,71 @@ class HeuristicTaxableDateTests(unittest.TestCase):
         inv = heuristics.extract_from_text(text)
         self.assertEqual(inv.issue_date.value, date(2026, 6, 30))
         self.assertEqual(inv.taxable_date.value, date(2026, 6, 15))
+
+
+
+class RealWorldWordingTests(unittest.TestCase):
+    """Znění DUZP odpozorovaná na skutečných fakturách.
+
+    Každé z nich se opravdu vyskytlo a na každém původní regex selhal.
+    """
+
+    def _taxable(self, text: str):
+        return heuristics.extract_from_text(text).taxable_date.value
+
+    def test_without_the_word_zdanitelneho(self):
+        # Čerpací karty: „uskutečnění plnění" bez „zdanitelného".
+        self.assertEqual(
+            self._taxable("Datum splatnosti: 05.08.2026 "
+                          "Datum uskutečnění plnění: 30.06.2026 Forma úhrady"),
+            date(2026, 6, 30))
+
+    def test_without_diacritics(self):
+        # reca: celá faktura bez diakritiky.
+        self.assertEqual(
+            self._taxable("Datum uskutecneni zdanitelneho plneni: 31.01.2024"),
+            date(2024, 1, 31))
+
+    def test_plain_datum_plneni(self):
+        self.assertEqual(self._taxable("Datum plnění 15. 6. 2026"), date(2026, 6, 15))
+
+
+class TaxPointGroundingTests(unittest.TestCase):
+    """Model dopisuje DUZP i tam, kde ho doklad nemá — na to je podlaha."""
+
+    def test_invoice_without_any_mention(self):
+        # ELITcar: v celém textu není o plnění ani slovo.
+        self.assertFalse(scoring.mentions_tax_point(
+            "Datum vystavení : 16.07.2026 Forma úhrady : Převodním příkazem "
+            "Datum splatnosti : 26.07.2026"))
+
+    def test_letter_spaced_text_still_counts(self):
+        # Königsmark: PDF s proloženými písmeny. Model to přečte správně,
+        # takže ho grounding nesmí shodit.
+        self.assertTrue(scoring.mentions_tax_point(
+            "d at u m u s ku te č n ěn í pl ně n í 20.07.2026"))
+
+    def test_interleaved_columns_still_count(self):
+        # Dvousloupcová faktura, kde se nadpisy prolnuly.
+        self.assertTrue(scoring.mentions_tax_point(
+            "Datum zdanitelného Datum vystavení / plnění / Delivery date: 28.01.2026"))
+
+    def test_model_value_is_dropped_when_unfounded(self):
+        inv = ExtractedInvoice(taxable_date=Field(date(2026, 7, 16), 0.7, SOURCE_LLM))
+        warnings = scoring.rescore(inv, "Datum vystavení 16.07.2026 Splatnost 26.07.2026")
+        self.assertIsNone(inv.taxable_date.value)
+        self.assertTrue(any("domyslel" in w for w in warnings))
+
+    def test_model_value_survives_when_the_document_mentions_it(self):
+        inv = ExtractedInvoice(taxable_date=Field(date(2026, 1, 28), 0.7, SOURCE_LLM))
+        scoring.rescore(inv, "Datum zdanitelného plnění / Delivery date: 28.01.2026")
+        self.assertEqual(inv.taxable_date.value, date(2026, 1, 28))
+
+    def test_structural_sources_are_never_dropped(self):
+        # ISDOC/QR čtou pole strojově — ta se proti textu neověřují.
+        inv = ExtractedInvoice(taxable_date=Field(date(2026, 6, 30), 0.98, SOURCE_ISDOC))
+        scoring.rescore(inv, "faktura bez jakékoli zmínky")
+        self.assertEqual(inv.taxable_date.value, date(2026, 6, 30))
 
 
 if __name__ == "__main__":

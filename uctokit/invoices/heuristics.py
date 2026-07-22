@@ -8,6 +8,7 @@ u složitých dá aspoň částku/VS/IČO k porovnání.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from . import validators as V
 from .types import Field, ExtractedInvoice, SOURCE_HEURISTIC
@@ -38,13 +39,26 @@ _DUE_DATE_RE = re.compile(
     r"(?:datum\s+splatnosti|splatnost(?:\s+faktury)?)\D{0,12}" + _DATE_VALUE,
     re.IGNORECASE,
 )
-# DUZP. Na fakturách stojí pod hromadou různých názvů a hlavně se zkracuje
-# kde kdo kde chce: „datum uskutečnění zdanitelného plnění", „Datum zdanit.
-# plnění" (takhle to má jeden dodavatel), „Dat. usk. zdan. plnění", „DUZP".
-# Proto je přídavné jméno psané jako `zdan\w*` s volitelnou tečkou.
-# Samotné „plnění" se schválně nechytá — to je i v „plnění dle smlouvy".
+def strip_diacritics(text: str) -> str:
+    """„plnění" → „plneni". Část faktur jede bez diakritiky (reca, Ahoj, …)."""
+    norm = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in norm if not unicodedata.combining(c))
+
+
+# DUZP. Na fakturách stojí pod hromadou různých názvů, zkracuje se kde kdo
+# kde chce a část dodavatelů píše bez diakritiky. Ověřeno na skutečných
+# fakturách, každá varianta se opravdu vyskytla:
+#
+#     Datum zdanit. plnění                
+#     Datum uskutečnění plnění            (Čerpací karty) — bez „zdanitelného"
+#     Datum uskutecneni zdanitelneho plneni   — bez diakritiky
+#     DUZP / Dat. usk. zdan. plnění
+#
+# Proto se hledá nad textem BEZ diakritiky a „zdanitelného" je nepovinné.
+# Samotné „plnění" bez uvozujícího „datum" se nechytá — to je i ve větách
+# typu „plnění dle smlouvy".
 _TAXABLE_DATE_RE = re.compile(
-    r"(?:dat(?:um)?\.?\s*(?:usk(?:utečnění)?\.?\s*)?zdan\w*\.?\s*plnění"
+    r"(?:dat(?:um)?\.?\s*(?:usk(?:utecneni)?\.?\s*)?(?:zdan\w*\.?\s*)?plneni"
     r"|\bDUZP\b|\bDUPZ\b)"
     r"\D{0,12}" + _DATE_VALUE,
     re.IGNORECASE,
@@ -108,7 +122,9 @@ def extract_from_text(text: str, source: str = SOURCE_HEURISTIC) -> ExtractedInv
         if due_date:
             inv.due_date = _field(due_date, raw=due.group(1))
 
-    taxable = _TAXABLE_DATE_RE.search(text)
+    # Nad textem bez diakritiky — datum samo diakritiku nemá, takže se dá
+    # vzít rovnou z shody.
+    taxable = _TAXABLE_DATE_RE.search(strip_diacritics(text))
     if taxable:
         taxable_date = V.normalize_date(taxable.group(1))
         if taxable_date:
