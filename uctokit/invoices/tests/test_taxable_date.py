@@ -80,12 +80,12 @@ class HeuristicTaxableDateTests(unittest.TestCase):
         self.assertEqual(self._taxable("Dat. usk. zdan. plnění 15. 6. 2026"),
                          date(2026, 6, 15))
 
-    def test_wording_used_on_a_real_invoice(self):
-        # Přesně takhle to píše jeden z dodavatelů — na tomhle tvaru
-        # původní regex selhal.
+    def test_shortened_adjective(self):
+        # Zkrácený přívlastek („zdanit.") — na tomhle tvaru původní
+        # regex selhal.
         self.assertEqual(
             self._taxable("Datum vystavení: 16.07.2026 "
-                          "Datum zdanit. plnění: 16.07.2026 IČ: 27800334"),
+                          "Datum zdanit. plnění: 16.07.2026 IČ: 12345679"),
             date(2026, 7, 16))
 
     def test_unrelated_fulfilment_wording_is_not_matched(self):
@@ -117,7 +117,7 @@ class RealWorldWordingTests(unittest.TestCase):
             date(2026, 6, 30))
 
     def test_without_diacritics(self):
-        # reca: celá faktura bez diakritiky.
+        # Dodavatel, jehož faktura je celá bez diakritiky.
         self.assertEqual(
             self._taxable("Datum uskutecneni zdanitelneho plneni: 31.01.2024"),
             date(2024, 1, 31))
@@ -130,14 +130,14 @@ class TaxPointGroundingTests(unittest.TestCase):
     """Model dopisuje DUZP i tam, kde ho doklad nemá — na to je podlaha."""
 
     def test_invoice_without_any_mention(self):
-        # ELITcar: v celém textu není o plnění ani slovo.
+        # Doklad, kde v celém textu není o plnění ani slovo.
         self.assertFalse(scoring.mentions_tax_point(
             "Datum vystavení : 16.07.2026 Forma úhrady : Převodním příkazem "
             "Datum splatnosti : 26.07.2026"))
 
     def test_letter_spaced_text_still_counts(self):
-        # Königsmark: PDF s proloženými písmeny. Model to přečte správně,
-        # takže ho grounding nesmí shodit.
+        # PDF s proloženými písmeny. Model to přečte správně, takže ho
+        # grounding nesmí shodit.
         self.assertTrue(scoring.mentions_tax_point(
             "d at u m u s ku te č n ěn í pl ně n í 20.07.2026"))
 

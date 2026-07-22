@@ -40,7 +40,7 @@ _DUE_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 def strip_diacritics(text: str) -> str:
-    """„plnění" → „plneni". Část faktur jede bez diakritiky (reca, Ahoj, …)."""
+    """„plnění" → „plneni". Část dodavatelů fakturuje bez diakritiky."""
     norm = unicodedata.normalize("NFKD", text or "")
     return "".join(c for c in norm if not unicodedata.combining(c))
 
