@@ -77,7 +77,7 @@ def _to_field(raw_value, key: str, base: float, source: str) -> Field:
 
     if key == "total_amount":
         value = V.normalize_amount(raw_value)
-    elif key in ("issue_date", "due_date"):
+    elif key in ("issue_date", "taxable_date", "due_date"):
         value = V.normalize_date(raw_value)
     elif key == "supplier_ico":
         value = V.normalize_ico(raw_value)

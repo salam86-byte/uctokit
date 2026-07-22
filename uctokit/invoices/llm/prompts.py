@@ -17,6 +17,7 @@ FIELD_KEYS: tuple[str, ...] = (
     "variable_symbol",
     "invoice_number",
     "issue_date",
+    "taxable_date",
     "due_date",
 )
 
@@ -36,13 +37,17 @@ SYSTEM_PROMPT = (
     "- variable_symbol: variabilní symbol, jen číslice\n"
     "- invoice_number: číslo faktury (řetězec)\n"
     "- issue_date: datum vystavení ve formátu YYYY-MM-DD\n"
+    "- taxable_date: datum uskutečnění zdanitelného plnění (DUZP) ve formátu "
+    "YYYY-MM-DD; často je stejné jako datum vystavení, ale ne vždy. Když na "
+    "faktuře není uvedené, dej null – nedopisuj datum vystavení\n"
     "- due_date: datum splatnosti ve formátu YYYY-MM-DD\n"
     "Text z PDF může mít promíchané levé a pravé sloupce. Vždy rozliš "
     "sekci Dodavatel od Odběratel/Plátce a neber údaje našeho klubu z odběratele. "
     "Dodavatel je ta strana, na jejíž bankovní účet se platí (peníze jdou jemu); "
     "odběratel/plátce je náš klub – jeho název, IČO ani adresu nikam nedávej. "
-    "Datum vystavení nezaměň s datem v patě, rejstříku ani datem zdanitelného "
-    "plnění. U XLSX mohou být číslo účtu a kód banky v oddělených buňkách.\n"
+    "Datum vystavení nezaměň s datem v patě, rejstříku ani s DUZP — to patří "
+    "do taxable_date. U XLSX mohou být číslo účtu a kód banky v oddělených "
+    "buňkách.\n"
     "Nevymýšlej hodnoty. Vrať čistý JSON bez markdown ohraničení."
 )
 

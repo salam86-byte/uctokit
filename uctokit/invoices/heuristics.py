@@ -38,6 +38,17 @@ _DUE_DATE_RE = re.compile(
     r"(?:datum\s+splatnosti|splatnost(?:\s+faktury)?)\D{0,12}" + _DATE_VALUE,
     re.IGNORECASE,
 )
+# DUZP. Na fakturách stojí pod hromadou různých názvů a hlavně se zkracuje
+# kde kdo kde chce: „datum uskutečnění zdanitelného plnění", „Datum zdanit.
+# plnění" (takhle to má jeden dodavatel), „Dat. usk. zdan. plnění", „DUZP".
+# Proto je přídavné jméno psané jako `zdan\w*` s volitelnou tečkou.
+# Samotné „plnění" se schválně nechytá — to je i v „plnění dle smlouvy".
+_TAXABLE_DATE_RE = re.compile(
+    r"(?:dat(?:um)?\.?\s*(?:usk(?:utečnění)?\.?\s*)?zdan\w*\.?\s*plnění"
+    r"|\bDUZP\b|\bDUPZ\b)"
+    r"\D{0,12}" + _DATE_VALUE,
+    re.IGNORECASE,
+)
 _INVOICE_NUMBER_RE = re.compile(
     r"(?:č\.?\s*faktury|(?:číslo|doklad)\s+faktury|daňový\s+doklad\s+číslo)"
     r"[ \t]*:?[ \t]*([A-Z0-9][A-Z0-9./_-]{0,59})",
@@ -96,6 +107,12 @@ def extract_from_text(text: str, source: str = SOURCE_HEURISTIC) -> ExtractedInv
         due_date = V.normalize_date(due.group(1))
         if due_date:
             inv.due_date = _field(due_date, raw=due.group(1))
+
+    taxable = _TAXABLE_DATE_RE.search(text)
+    if taxable:
+        taxable_date = V.normalize_date(taxable.group(1))
+        if taxable_date:
+            inv.taxable_date = _field(taxable_date, raw=taxable.group(1))
 
     number = _LEADING_INVOICE_NUMBER_RE.search(text) or _INVOICE_NUMBER_RE.search(text)
     if number:

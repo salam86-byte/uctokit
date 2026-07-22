@@ -21,6 +21,7 @@ FIELD_NAMES: tuple[str, ...] = (
     "variable_symbol",
     "invoice_number",
     "issue_date",
+    "taxable_date",
     "due_date",
 )
 
@@ -122,6 +123,11 @@ class ExtractedInvoice:
     variable_symbol: Field = field(default_factory=empty_field)
     invoice_number: Field = field(default_factory=empty_field)
     issue_date: Field = field(default_factory=empty_field)
+    # DUZP — datum uskutečnění zdanitelného plnění. Rozhoduje o tom, do
+    # kterého období spadne DPH, a od data vystavení se běžně liší (typicky
+    # u služeb fakturovaných zpětně). Účetní systém si bez něj doplní datum
+    # pořízení, což přes přelom měsíce znamená daň ve špatném období.
+    taxable_date: Field = field(default_factory=empty_field)
     due_date: Field = field(default_factory=empty_field)
 
     def items(self):
@@ -164,6 +170,7 @@ class ExtractionResult:
             "variable_symbol": inv.variable_symbol.value or "",
             "invoice_number": inv.invoice_number.value or "",
             "issue_date": inv.issue_date.value,
+            "taxable_date": inv.taxable_date.value,
             "due_date": inv.due_date.value,
             "method": self.method,
         }

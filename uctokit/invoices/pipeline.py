@@ -290,7 +290,7 @@ def _from_image(document, extractor, config) -> ExtractionResult:
 def _values_agree(name: str, a, b) -> bool:
     if name == "total_amount":
         return isinstance(a, Decimal) and isinstance(b, Decimal) and a == b
-    if name in ("issue_date", "due_date"):
+    if name in ("issue_date", "taxable_date", "due_date"):
         return a == b
     return str(a).strip().upper() == str(b).strip().upper()
 

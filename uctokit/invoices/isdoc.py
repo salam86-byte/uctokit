@@ -81,6 +81,10 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
         variable_symbol=_field(first("VariableSymbol")),
         invoice_number=_field(invoice_number or None),
         issue_date=_field(V.normalize_date(first("IssueDate")), raw=first("IssueDate")),
+        # DUZP nese ISDOC jako `TaxPointDate` — strojově a přesně, takže se
+        # u elektronické faktury nemusí dohadovat z textu.
+        taxable_date=_field(V.normalize_date(first("TaxPointDate")),
+                            raw=first("TaxPointDate")),
         due_date=_field(V.normalize_date(first("PaymentDueDate")), raw=first("PaymentDueDate")),
     )
     return inv

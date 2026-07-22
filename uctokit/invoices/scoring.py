@@ -56,7 +56,7 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
             in_text = V.token_in_text(str(f.value), raw_text)
             f.confidence = _clamp(base + (0.15 if in_text else 0.0))
 
-        elif name in ("issue_date", "due_date"):
+        elif name in ("issue_date", "taxable_date", "due_date"):
             ok = V.date_sane(f.value)
             f.confidence = _clamp(base + (0.15 if ok else -0.3))
             if not ok:

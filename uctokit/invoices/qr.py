@@ -91,6 +91,14 @@ def parse_spayd(payload: str) -> ExtractedInvoice | None:
     if issued:
         inv.issue_date = Field(issued, 0.9, SOURCE_QR, data.get("DD"))
 
+    # QR Faktura veze DUZP přímo (klíč `DUZP`); `DPPD` je datum povinnosti
+    # přiznat daň, což u přijaté faktury vychází nastejno a bereme ho jako
+    # náhradu, když samotné DUZP v kódu není.
+    taxable = _parse_date(data.get("DUZP") or data.get("DPPD"))
+    if taxable:
+        inv.taxable_date = Field(taxable, 0.9, SOURCE_QR,
+                                 data.get("DUZP") or data.get("DPPD"))
+
     number = data.get("ID")
     if number:
         inv.invoice_number = Field(number, 0.9, SOURCE_QR, number)
