@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from uctokit.invoices.isdoc import parse_amounts, parse_isdoc, parse_totals
+from uctokit.invoices.scoring import overall_confidence, rescore
 
 ISDOC_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="http://isdoc.cz/namespace/2013" version="6.0.1">
@@ -142,6 +143,67 @@ class ParseIsdocTests(unittest.TestCase):
 
     def test_invalid_bytes_returns_none(self):
         self.assertIsNone(parse_isdoc(b"not xml at all"))
+
+
+# Hotovostní faktura (ALL SPORTS): PaymentMeansCode 10 = v hotovosti, proto
+# BEZ účtu, VS i splatnosti – schválně, ne chybou extrakce.
+CASH_SAMPLE = b"""<?xml version="1.0" encoding="utf-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/invoice" version="5.2">
+  <ID>26002894</ID>
+  <IssueDate>2026-06-18</IssueDate>
+  <AccountingSupplierParty><Party>
+    <PartyIdentification><ID>26770164</ID></PartyIdentification>
+    <PartyName><Name>ALL SPORTS a. s.</Name></PartyName>
+  </Party></AccountingSupplierParty>
+  <PaymentMeans><Payment>
+    <PaidAmount>4130</PaidAmount>
+    <PaymentMeansCode>10</PaymentMeansCode>
+  </Payment></PaymentMeans>
+  <LegalMonetaryTotal><TaxInclusiveAmount>4130.00</TaxInclusiveAmount></LegalMonetaryTotal>
+</Invoice>"""
+
+
+# Dobropis: záporná částka je legitimní opravný doklad, ne „nulová/nečitelná".
+CREDIT_NOTE_SAMPLE = b"""<?xml version="1.0" encoding="utf-8"?>
+<Invoice xmlns="http://isdoc.cz/namespace/invoice" version="5.2">
+  <ID>26003338</ID>
+  <IssueDate>2026-06-26</IssueDate>
+  <AccountingSupplierParty><Party>
+    <PartyIdentification><ID>26770164</ID></PartyIdentification>
+    <PartyName><Name>ALL SPORTS a. s.</Name></PartyName>
+  </Party></AccountingSupplierParty>
+  <PaymentMeans><Payment>
+    <PaymentMeansCode>42</PaymentMeansCode>
+    <Details><ID>2106782708</ID><BankCode>2700</BankCode></Details>
+    <PaymentDueDate>2026-07-10</PaymentDueDate>
+  </Payment></PaymentMeans>
+  <LegalMonetaryTotal><TaxInclusiveAmount>-1453.00</TaxInclusiveAmount></LegalMonetaryTotal>
+</Invoice>"""
+
+
+class CashAndCreditNoteTests(unittest.TestCase):
+    """Hotovostní doklad a dobropis se nesmí hodnotit jako chybně vyčtené."""
+
+    def test_cash_payment_is_detected(self):
+        inv = parse_isdoc(CASH_SAMPLE)
+        self.assertTrue(inv.payment_in_cash)
+        self.assertFalse(inv.supplier_account.is_present)  # hotovost = bez účtu
+        self.assertFalse(inv.variable_symbol.is_present)
+
+    def test_transfer_is_not_cash(self):
+        self.assertFalse(parse_isdoc(ISDOC_SAMPLE).payment_in_cash)
+
+    def test_cash_invoice_keeps_high_confidence(self):
+        # Chybějící VS/splatnost NESMÍ srazit jistotu – u hotovosti tam nepatří.
+        inv = parse_isdoc(CASH_SAMPLE)
+        rescore(inv, None)
+        self.assertGreaterEqual(overall_confidence(inv), 0.9)
+
+    def test_negative_amount_is_a_credit_note_not_error(self):
+        inv = parse_isdoc(CREDIT_NOTE_SAMPLE)
+        self.assertEqual(inv.total_amount.value, Decimal("-1453.00"))
+        warnings = rescore(inv, None)
+        self.assertFalse(any("nulová nebo nečitelná" in w for w in warnings))
 
 
 if __name__ == "__main__":

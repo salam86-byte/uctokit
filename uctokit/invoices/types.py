@@ -130,6 +130,12 @@ class ExtractedInvoice:
     taxable_date: Field = field(default_factory=empty_field)
     due_date: Field = field(default_factory=empty_field)
 
+    # Metadata dokladu (NE vytěžované pole – neiteruje se v ``items()``):
+    # platba v hotovosti podle ISDOC ``PaymentMeansCode`` (10 = v hotovosti).
+    # Takový doklad legitimně nemá účet, VS ani splatnost – ať se to nehodnotí
+    # jako chybějící data ani nesráží jistotu.
+    payment_in_cash: bool = False
+
     def items(self):
         """Iteruje ``(název_pole, Field)`` v kanonickém pořadí."""
         for name in FIELD_NAMES:
@@ -172,5 +178,6 @@ class ExtractionResult:
             "issue_date": inv.issue_date.value,
             "taxable_date": inv.taxable_date.value,
             "due_date": inv.due_date.value,
+            "payment_in_cash": inv.payment_in_cash,
             "method": self.method,
         }

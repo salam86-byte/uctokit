@@ -62,10 +62,12 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
 
         elif name == "total_amount":
             amount = f.value if isinstance(f.value, Decimal) else V.normalize_amount(f.value)
-            if amount is None or amount <= 0:
+            # Záporná částka je legitimní dobropis (opravný doklad), ne chyba –
+            # jen nula/nečitelno je problém. V textu se hledá bez znaménka.
+            if amount is None or amount == 0:
                 f.confidence = _clamp(base - 0.35)
                 warnings.append("Částka je nulová nebo nečitelná – zkontrolujte.")
-            elif V.amount_in_text(amount, raw_text):
+            elif V.amount_in_text(abs(amount), raw_text):
                 f.confidence = _clamp(base + 0.2)
             else:
                 f.confidence = _clamp(base)
@@ -107,6 +109,10 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
 def overall_confidence(inv: ExtractedInvoice) -> float:
     """Průměr jistot klíčových polí, které rozhodují o zaplatitelnosti faktury."""
     key_fields = ("supplier_name", "supplier_ico", "total_amount", "variable_symbol", "due_date")
+    # Hotovostní doklad nemá VS ani splatnost (platí se na místě) – nesmí ho to
+    # táhnout dolů jako „chybějící data". Rozhoduje jen dodavatel + částka.
+    if inv.payment_in_cash:
+        key_fields = ("supplier_name", "supplier_ico", "total_amount")
     scores = [getattr(inv, name).confidence for name in key_fields]
     present = [s for s in scores if s > 0]
     if not present:

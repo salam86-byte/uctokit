@@ -164,4 +164,7 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
                             raw=first("TaxPointDate")),
         due_date=_field(V.normalize_date(first("PaymentDueDate")), raw=first("PaymentDueDate")),
     )
+    # Platba v hotovosti: ISDOC PaymentMeansCode 10 (UN/CEFACT 4461 = „in cash").
+    # Takový doklad nemá bankovní účet, VS ani splatnost – schválně, ne chybou.
+    inv.payment_in_cash = (first("PaymentMeansCode") or "").strip() == "10"
     return inv
