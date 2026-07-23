@@ -17,7 +17,8 @@ class ParseTransactionsTests(unittest.TestCase):
                             "column1": {"value": 500.0},
                             "column5": {"value": "12345678"},
                             "column10": {"value": "Novák Jan"},
-                            "column2": {"value": "123456/0800"},
+                            "column2": {"value": "123456"},
+                            "column3": {"value": "0800"},
                             "column16": {"value": "prispevek"},
                         }
                     ]
@@ -32,6 +33,8 @@ class ParseTransactionsTests(unittest.TestCase):
         self.assertEqual(item["amount"], 500.0)
         self.assertEqual(item["vs"], "12345678")
         self.assertEqual(item["counterparty_name"], "Novák Jan")
+        self.assertEqual(item["counterparty_account"], "123456")
+        self.assertEqual(item["bank_code"], "0800")
         self.assertEqual(item["message"], "prispevek")
 
     def test_handles_missing_optional_columns(self):

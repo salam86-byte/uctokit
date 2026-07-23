@@ -5,7 +5,7 @@ zakládání plateb a párování dělá aplikační vrstva nad tímhle výstupe
 
 Formát: https://www.fio.cz/docs/cz/API_Bankovnictvi.pdf
 Sloupce transakce (``column<N>``): 22=ID pohybu, 0=Datum, 1=Objem, 5=VS,
-10=Název protiúčtu, 2=Protiúčet, 8=Typ pohybu, 16=Zpráva pro příjemce.
+10=Název protiúčtu, 2=Protiúčet, 3=Kód banky, 8=Typ pohybu, 16=Zpráva pro příjemce.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ def parse_transactions(data: dict) -> list[dict]:
                 "vs": str(vs).strip() if vs not in (None, "") else "",
                 "counterparty_name": _col(txn, 10) or "",
                 "counterparty_account": str(_col(txn, 2) or ""),
+                "bank_code": str(_col(txn, 3) or ""),
                 "message": _col(txn, 16) or "",
                 "type": _col(txn, 8) or "",
             }
