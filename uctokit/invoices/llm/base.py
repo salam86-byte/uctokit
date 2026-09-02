@@ -81,6 +81,8 @@ def _to_field(raw_value, key: str, base: float, source: str) -> Field:
         value = V.normalize_date(raw_value)
     elif key == "supplier_ico":
         value = V.normalize_ico(raw_value)
+    elif key == "supplier_dic":
+        value = V.normalize_dic(raw_value)
     elif key == "variable_symbol":
         value = V.normalize_vs(raw_value)
     elif key == "supplier_iban":

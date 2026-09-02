@@ -16,6 +16,10 @@ from .types import Field, ExtractedInvoice, SOURCE_HEURISTIC
 BASE_CONFIDENCE = 0.5
 
 _ICO_RE = re.compile(r"I[ČC](?:O)?[:\s]*?(\d{8})", re.IGNORECASE)
+# DIČ: dvoupísmenný kód země + identifikátor. České je „CZ" + 8 až 10 číslic
+# (u fyzické osoby rodné číslo), zahraniční mívá i písmena. Hranice slova
+# vpředu, ať se „DIČ" nechytne uprostřed jiného slova.
+_DIC_RE = re.compile(r"\bDI[ČC][:\s]*([A-Z]{2}[0-9A-Z]{6,14})", re.IGNORECASE)
 _VS_RE = re.compile(r"(?:variabiln\w*\s*symbol|\bVS)\D{0,4}(\d{1,10})", re.IGNORECASE)
 _IBAN_RE = re.compile(r"\bCZ\d{2}(?:\s?[0-9]){20}\b")
 _ACCOUNT_RE = re.compile(r"\b(?:\d{1,6}-)?\d{3,10}/\d{4}\b")
@@ -103,6 +107,12 @@ def extract_from_text(text: str, source: str = SOURCE_HEURISTIC) -> ExtractedInv
     if ico:
         inv.supplier_ico = _field(V.normalize_ico(ico.group(1)), raw=ico.group(1))
 
+    dic = _supplier_dic_match(text, ico)
+    if dic:
+        hodnota = V.normalize_dic(dic.group(1))
+        if hodnota:
+            inv.supplier_dic = _field(hodnota, raw=dic.group(1))
+
     vs = _VS_RE.search(text)
     if vs:
         inv.variable_symbol = _field(V.normalize_vs(vs.group(1)), raw=vs.group(1))
@@ -167,6 +177,25 @@ def extract_from_text(text: str, source: str = SOURCE_HEURISTIC) -> ExtractedInv
             if f.is_present:
                 f.source = source
     return inv
+
+
+def _supplier_dic_match(text: str, ico_match):
+    """DIČ dodavatele — ze stejného bloku jako jeho IČO.
+
+    Na dokladu jsou DIČ zpravidla DVĚ: dodavatele a naše. Vzít „první"
+    by u layoutu s odběratelem nahoře sebralo to naše. Kotvou je proto už
+    vybrané IČO dodavatele (`_supplier_ico_match`) — ta funkce ten problém
+    řeší a je otestovaná, takže se tu neřeší podruhé jinak.
+
+    Bez IČO (nebo když je DIČ jen jedno) se bere první nález: víc informace
+    nemáme a mlčet by bylo horší než nabídnout hodnotu ke kontrole.
+    """
+    matches = list(_DIC_RE.finditer(text))
+    if not matches:
+        return None
+    if len(matches) == 1 or ico_match is None:
+        return matches[0]
+    return min(matches, key=lambda m: abs(m.start() - ico_match.start()))
 
 
 def _supplier_ico_match(text: str):

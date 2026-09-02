@@ -14,6 +14,7 @@ from decimal import Decimal
 FIELD_NAMES: tuple[str, ...] = (
     "supplier_name",
     "supplier_ico",
+    "supplier_dic",
     "supplier_iban",
     "supplier_account",
     "total_amount",
@@ -118,6 +119,12 @@ class ExtractedInvoice:
     supplier_ico: Field = field(default_factory=empty_field)
     supplier_iban: Field = field(default_factory=empty_field)
     supplier_account: Field = field(default_factory=empty_field)
+    # DIČ dodavatele. Na párování se NEPOUŽÍVÁ — klíčem je IČO. Cenu má jako
+    # křížová kontrola: české DIČ právnické osoby je „CZ" + IČO, takže rozpor
+    # mezi nimi na jednom dokladu je levný signál překlepu i podvrhu. A
+    # u zahraničního plátce bez českého IČO je to jediný daňový identifikátor,
+    # který doklad nese.
+    supplier_dic: Field = field(default_factory=empty_field)
     total_amount: Field = field(default_factory=empty_field)
     currency: Field = field(default_factory=empty_field)
     variable_symbol: Field = field(default_factory=empty_field)
@@ -169,6 +176,7 @@ class ExtractionResult:
         return {
             "supplier_name": inv.supplier_name.value or "",
             "supplier_ico": inv.supplier_ico.value or "",
+            "supplier_dic": inv.supplier_dic.value or "",
             "supplier_iban": inv.supplier_iban.value or "",
             "supplier_account": inv.supplier_account.value or "",
             "total_amount": inv.total_amount.value,

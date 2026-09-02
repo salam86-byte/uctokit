@@ -10,6 +10,7 @@ from __future__ import annotations
 FIELD_KEYS: tuple[str, ...] = (
     "supplier_name",
     "supplier_ico",
+    "supplier_dic",
     "supplier_iban",
     "supplier_account",
     "total_amount",
@@ -29,6 +30,9 @@ SYSTEM_PROMPT = (
     "číslo popisné, město ani PSČ (např. Střední průmyslová škola a Obchodní "
     "akademie, příspěvková organizace – ne ulici Větrná 1809/18 ani město)\n"
     "- supplier_ico: IČO dodavatele, 8 číslic jako řetězec\n"
+    "- supplier_dic: DIČ DODAVATELE (ne odběratele) — kód země a číslo, "
+    "např. CZ25194798. Na dokladu jsou DIČ zpravidla dvě, vezmi to ze stejného "
+    "bloku jako IČO dodavatele. Když doklad DIČ neuvádí, dej null\n"
     "- supplier_iban: IBAN účtu dodavatele bez mezer, nebo null\n"
     "- supplier_account: číslo účtu ve tvaru cislo/kodbanky, nebo null\n"
     "- total_amount: celková částka k úhradě jako číslo s desetinnou tečkou "
@@ -39,8 +43,9 @@ SYSTEM_PROMPT = (
     "- issue_date: datum vystavení ve formátu YYYY-MM-DD\n"
     "- taxable_date: datum uskutečnění zdanitelného plnění ve formátu "
     "YYYY-MM-DD. Je to SAMOSTATNÝ řádek dokladu s vlastním popiskem: DUZP, "
-    "„Datum zdanitelného plnění“, „Datum uskutečnění plnění“ nebo zkráceně "
-    "(„Datum usk. zd. plnění“) – popisek bývá i oříznutý nebo bez diakritiky. "
+    "„Datum zdanitelného plnění“, „Datum uskutečnění plnění“, „Datum UZP“ "
+    "nebo zkráceně („Datum usk. zd. plnění“) – popisek bývá i oříznutý nebo "
+    "bez diakritiky. "
     "Vezmi datum z TOHOTO řádku, nikdy ne z řádku „Datum vystavení“; ta dvě "
     "data se běžně liší (u služeb bývá DUZP poslední den měsíce, za který se "
     "fakturuje). Když doklad takový řádek nemá, dej null\n"

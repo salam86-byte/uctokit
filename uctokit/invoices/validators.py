@@ -82,6 +82,18 @@ def normalize_ico(raw) -> str:
     return digits.zfill(8) if 0 < len(digits) <= 8 else digits
 
 
+def normalize_dic(raw) -> str:
+    """DIČ na tvar „CZ12345678" — velkými, bez mezer a teček.
+
+    Tvar se NEDOPLŇUJE nulami jako u IČO: české DIČ právnické osoby je sice
+    „CZ" + IČO, ale u fyzické osoby je to rodné číslo (10 číslic) a
+    u zahraničního plátce úplně jiná struktura. Doplnit nulu by z platného
+    čísla udělalo neplatné.
+    """
+    text = re.sub(r"[\s.\-]", "", str(raw or "")).upper()
+    return text if re.fullmatch(r"[A-Z]{2}[0-9A-Z]{6,14}", text) else ""
+
+
 def normalize_vs(raw) -> str:
     return re.sub(r"\D", "", str(raw or ""))[:10]
 

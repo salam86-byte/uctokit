@@ -125,6 +125,9 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
 
     supplier = subtree("AccountingSupplierParty")
     raw_ico = first("ID", supplier)
+    # DIČ nese ISDOC v `PartyTaxScheme/CompanyID` uvnitř bloku dodavatele.
+    # Hledá se JEN v jeho podstromu — v celém dokladu je i DIČ odběratele.
+    raw_dic = first("CompanyID", supplier)
     raw_iban = first("IBAN")
     # Celková částka je `TaxInclusiveAmount`, ne `PayableAmount` – to je u
     # vyúčtovací faktury zbytek po odpočtu zálohy (klidně nula). Doklady bez
@@ -151,6 +154,8 @@ def parse_isdoc(content: bytes) -> ExtractedInvoice | None:
     inv = ExtractedInvoice(
         supplier_name=_field(first("Name", supplier)),
         supplier_ico=_field(V.normalize_ico(raw_ico) if raw_ico else None, raw=raw_ico),
+        supplier_dic=_field(V.normalize_dic(raw_dic) or None if raw_dic else None,
+                            raw=raw_dic),
         supplier_iban=_field(V.normalize_iban(raw_iban) if raw_iban else None, raw=raw_iban),
         supplier_account=_field(V.normalize_account(account) if account else None, raw=account or None),
         total_amount=_field(amount, raw=raw_amount),
