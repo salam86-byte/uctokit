@@ -184,3 +184,69 @@ class ClippedLabelTests(unittest.TestCase):
 
     def test_still_ignores_unrelated_fulfilment(self):
         self.assertIsNone(self._taxable("plně automatický režim 15. 6. 2026"))
+
+
+class PplUzpTests(unittest.TestCase):
+    """PPL píše „Datum UZP" — zkratku BEZ vedoucího D (v0.5.3).
+
+    Na faktuře 3260915247 stálo UZP 21. 8. 2026 a datum vystavení
+    1. 9. 2026, tedy JINÝ MĚSÍC. Bez vytěženého UZP se do účetnictví
+    pošle datum vystavení a DPH spadne do špatného období — přesně to,
+    proti čemu to pole je.
+    """
+
+    def _taxable(self, text: str):
+        return heuristics.extract_from_text(text).taxable_date.value
+
+    def test_ppl_wording(self):
+        self.assertEqual(self._taxable("Datum UZP: 21.08.2026"),
+                         date(2026, 8, 21))
+
+    def test_value_on_the_next_line(self):
+        # Tak to PPL do PDF opravdu sází: popisek a hodnota ve dvou řádcích.
+        self.assertEqual(self._taxable("Datum UZP:\n21.08.2026"),
+                         date(2026, 8, 21))
+
+    def test_abbreviated_label(self):
+        self.assertEqual(self._taxable("Dat. UZP 21.08.2026"),
+                         date(2026, 8, 21))
+
+    def test_real_ppl_header(self):
+        """Celá hlavička PPL — UZP se nesmí splést s vystavením ani
+        splatností, které jsou hned pod ním."""
+        text = ("Variabilní symbol: 3260915247\n"
+                "Datum UZP:\n21.08.2026\n"
+                "Datum vystavení:\n01.09.2026\n"
+                "Datum splatnosti:\n15.09.2026\n")
+        inv = heuristics.extract_from_text(text)
+        self.assertEqual(inv.taxable_date.value, date(2026, 8, 21))
+        self.assertEqual(inv.issue_date.value, date(2026, 9, 1))
+        self.assertEqual(inv.due_date.value, date(2026, 9, 15))
+
+    def test_bare_uzp_without_datum_is_not_matched(self):
+        """Samotné „UZP" je zkratka i pro jiné věci (územní plán, útvar),
+        takže se bere jen s uvozujícím „datum"."""
+        self.assertIsNone(self._taxable("UZP 21.08.2026"))
+        self.assertIsNone(self._taxable("Územní plán UZP schválen 21.08.2026"))
+
+
+class PplGroundingTests(unittest.TestCase):
+    """„Datum UZP" musí projít i podlahou proti vymýšlení (v0.5.3).
+
+    Bez markeru byl PPL doklad dvakrát ztracený: heuristika popisek
+    neznala A grounding zahodil i správnou hodnotu od modelu, protože
+    o plnění prý nepadlo ani slovo.
+    """
+
+    def test_ppl_wording_counts_as_a_mention(self):
+        self.assertTrue(scoring.mentions_tax_point("Datum UZP: 21.08.2026"))
+
+    def test_known_wordings_still_count(self):
+        for text in ("DUZP: 21.08.2026",
+                     "Datum uskutečnění zdanitelného plnění 21.08.2026",
+                     "TaxPointDate 2026-08-21"):
+            self.assertTrue(scoring.mentions_tax_point(text), text)
+
+    def test_invoice_without_any_mention_still_fails(self):
+        self.assertFalse(scoring.mentions_tax_point(
+            "Faktura c. 123, castka 1000 Kc, splatnost 15.9.2026"))

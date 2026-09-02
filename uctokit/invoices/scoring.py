@@ -19,8 +19,12 @@ _MIN, _MAX = 0.05, 0.99
 # Slova, kterými faktura mluví o datu plnění. Hledá se v textu bez diakritiky
 # A BEZ MEZER — část PDF má písmena proložená („d a tu m u s ku te č n ěn í
 # pl ně n í“), takže na mezery se spolehnout nedá.
-_TAX_POINT_MARKERS = ("plneni", "duzp", "dupz", "deliverydate", "taxpointdate",
-                      "dateofsupply")
+# „uzp" pokrývá i „duzp"/„dupz" jako podřetězec; obojí se nechává kvůli
+# čitelnosti. PPL píše „Datum UZP" a bez tohohle markeru se hodnota od
+# modelu zahodila jako nepodložená — doklad o plnění „ani slovo" neříkal
+# (faktura 3260915247, nález 2. 9. 2026).
+_TAX_POINT_MARKERS = ("plneni", "uzp", "duzp", "dupz", "deliverydate",
+                      "taxpointdate", "dateofsupply")
 
 
 def mentions_tax_point(raw_text: str) -> bool:

@@ -54,14 +54,21 @@ def strip_diacritics(text: str) -> str:
 #     Datum uskutecneni zdanitelneho plneni — bez diakritiky
 #     Datum usk. zd. plně                   — popisek uříznutý políčkem
 #     DUZP / Dat. usk. zdan. plnění
+#     Datum UZP                             — PPL: zkratka BEZ vedoucího D
 #
 # Proto se hledá nad textem BEZ diakritiky, „zdanitelného" je nepovinné
 # a podstatné jméno smí být uříznuté (`pln` + zbytek do hranice slova).
 # Samotné „plnění" bez uvozujícího „datum" se nechytá — to je i ve větách
 # typu „plnění dle smlouvy".
+#
+# `UZP` se bere jen s uvozujícím „datum": samotná trojice písmen je i
+# zkratka pro ledacos jiného (územní plán, ÚZP jako útvar), kdežto
+# „Datum UZP" nic jiného znamenat nemůže. `DUZP`/`DUPZ` uvození nepotřebují,
+# ty jsou jednoznačné samy o sobě.
 _TAXABLE_DATE_RE = re.compile(
     r"(?:dat(?:um)?\.?\s*(?:usk(?:utecneni)?\.?\s*)?(?:zd(?:an\w*)?\.?\s*)?"
     r"pln(?:eni|en|e)\b"
+    r"|dat(?:um)?\.?\s*UZP\b"
     r"|\bDUZP\b|\bDUPZ\b)"
     r"\D{0,12}" + _DATE_VALUE,
     re.IGNORECASE,
