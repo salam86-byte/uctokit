@@ -19,7 +19,13 @@ _ICO_RE = re.compile(r"I[ČC](?:O)?[:\s]*?(\d{8})", re.IGNORECASE)
 # DIČ: dvoupísmenný kód země + identifikátor. České je „CZ" + 8 až 10 číslic
 # (u fyzické osoby rodné číslo), zahraniční mívá i písmena. Hranice slova
 # vpředu, ať se „DIČ" nechytne uprostřed jiného slova.
-_DIC_RE = re.compile(r"\bDI[ČC][:\s]*([A-Z]{2}[0-9A-Z]{6,14})", re.IGNORECASE)
+#
+# `IČ DPH` je slovenský popisek téhož a musí se brát taky: na faktuře
+# Phobosstudia (TONEZO 1009980368) stálo u dodavatele „DIČ 1073812245"
+# BEZ kódu země a „IČ DPH SK1073812245" s ním. Jediné, co starý vzor
+# našel, bylo „DIČ CZ27800334" — DIČ ODBĚRATELE, tedy naše.
+_DIC_RE = re.compile(
+    r"\b(?:DI[ČC]|I[ČC]\s*DPH)[:\s]*([A-Z]{2}[0-9A-Z]{6,14})", re.IGNORECASE)
 _VS_RE = re.compile(r"(?:variabiln\w*\s*symbol|\bVS)\D{0,4}(\d{1,10})", re.IGNORECASE)
 _IBAN_RE = re.compile(r"\bCZ\d{2}(?:\s?[0-9]){20}\b")
 _ACCOUNT_RE = re.compile(r"\b(?:\d{1,6}-)?\d{3,10}/\d{4}\b")
@@ -191,6 +197,27 @@ def _supplier_dic_match(text: str, ico_match):
     nemáme a mlčet by bylo horší než nabídnout hodnotu ke kontrole.
     """
     matches = list(_DIC_RE.finditer(text))
+    if not matches:
+        return None
+
+    # Zahodit DIČ, jehož číslice sedí na JINÉ IČO z dokladu než dodavatelovo.
+    # České (i slovenské) DIČ právnické osoby je kód země + IČO, takže
+    # „CZ27800334" u dokladu, kde je i „IČO 27800334" odběratele, je DIČ
+    # protistrany — a to naše. Na proformě od Phobosstudia to byl JEDINÝ
+    # nález, takže samotné „když je jeden, vezmi ho" sáhlo vedle.
+    dodavatel = V.normalize_ico(ico_match.group(1)) if ico_match else ""
+    ciziZaznamy = {
+        V.normalize_ico(m.group(1))
+        for m in _ICO_RE.finditer(text)
+        if V.normalize_ico(m.group(1)) != dodavatel
+    }
+    matches = [m for m in matches
+               if V.normalize_ico(re.sub(r"^[A-Z]{2}", "", m.group(1).upper()))
+               not in ciziZaznamy]
+    # Když po vyřazení nic nezbude, vrací se PRÁZDNO, ne původní nález:
+    # cizí DIČ je horší než žádné. Doklad, kde je jen DIČ odběratele
+    # (dodavatel je zahraniční a má „VAT", ne „DIČ"), tak nechá pole
+    # modelu — ten popisek „VAT #" přečte.
     if not matches:
         return None
     if len(matches) == 1 or ico_match is None:

@@ -99,3 +99,62 @@ class IsdocDicTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CounterpartyDicTests(unittest.TestCase):
+    """DIČ protistrany se vzít NESMÍ, ani když je na dokladu jediné (v0.6.1).
+
+    Proforma Phobosstudia (TONEZO 1009980368): dodavatel má „DIČ
+    1073812245" BEZ kódu země a „IČ DPH SK1073812245" s ním, odběratel
+    „DIČ CZ27800334". Starý vzor našel jen to poslední — tedy NAŠE DIČ —
+    a protože byl jediný, vzal ho.
+    """
+
+    def _inv(self, text):
+        return heuristics.extract_from_text(text)
+
+    PROFORMA = ("Dodavatel Jaroslav Adamec - Phobosstudio  Odberatel MX-NET\n"
+                "ICO 41596404 ICO 27800334\n"
+                "DIC 1073812245 DIC CZ27800334\n"
+                "IC DPH SK1073812245\n")
+
+    def test_slovak_supplier_wins_over_our_dic(self):
+        inv = self._inv(self.PROFORMA)
+        self.assertEqual(inv.supplier_ico.value, "41596404")
+        self.assertEqual(inv.supplier_dic.value, "SK1073812245")
+
+    def test_ic_dph_label_is_recognised(self):
+        inv = self._inv("Dodavatel s.r.o.\nIC 41596404\nIC DPH SK1073812245\n")
+        self.assertEqual(inv.supplier_dic.value, "SK1073812245")
+
+    def test_customer_dic_alone_is_refused(self):
+        """Jediný nález, ale sedí na IČO odběratele → radši nic než cizí."""
+        inv = self._inv("Dodavatel s.r.o.\nICO 41596404\n"
+                        "Odberatel MX-NET ICO 27800334 DIC CZ27800334\n")
+        self.assertIsNone(inv.supplier_dic.value)
+
+    def test_supplier_dic_matching_its_own_ico_is_kept(self):
+        """Běžný případ: DIČ = CZ + IČO dodavatele. Nesmí se zahodit."""
+        inv = self._inv("Dodavatel PPL CZ s.r.o.\nICO 25194798\nDIC CZ25194798\n"
+                        "Odberatel MX-NET ICO 27800334 DIC CZ27800334\n")
+        self.assertEqual(inv.supplier_dic.value, "CZ25194798")
+
+    def test_foreign_supplier_is_beyond_this_layer(self):
+        """Polská faktura (PL26000900401): dodavatel má „VAT # PL5263736824",
+        což není popisek DIČ. Na dokladu je pak JEDINÉ IČO to naše, takže
+        `_supplier_ico_match` ho vezme za dodavatelovo a „CZ27800334" na
+        něj sedí — odsud se to rozeznat NEDÁ.
+
+        Rozliší to až konzument, který ví, kdo je „my": v HUBu to dělá
+        `after_extraction` (`OwnDicTests`). Test drží hranici zodpovědnosti,
+        ať se sem nezavádí hádání."""
+        inv = self._inv("wuhanlinxiafengqidianzishangwuyouxiangongsi\n"
+                        "VAT # PL5263736824\n"
+                        "Kupujacy MX-NET ICO 27800334 DIC: CZ27800334\n")
+        self.assertEqual(inv.supplier_dic.value, "CZ27800334")
+
+    def test_foreign_dic_labelled_as_dic_is_kept(self):
+        """Když zahraniční dodavatel popisek „DIČ" použije a na žádné IČO
+        z dokladu nesedí, není důvod ho zahazovat."""
+        inv = self._inv("Dodavatel GmbH\nDIC DE123456789\n")
+        self.assertEqual(inv.supplier_dic.value, "DE123456789")
