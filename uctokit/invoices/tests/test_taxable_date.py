@@ -10,7 +10,8 @@ from datetime import date
 
 from uctokit.invoices import heuristics, isdoc, qr, scoring
 from uctokit.invoices.types import (
-    FIELD_NAMES, SOURCE_ISDOC, SOURCE_LLM, ExtractedInvoice, Field,
+    FIELD_NAMES, SOURCE_ISDOC, SOURCE_LLM, SOURCE_VISION,
+    ExtractedInvoice, Field,
 )
 
 
@@ -250,3 +251,37 @@ class PplGroundingTests(unittest.TestCase):
     def test_invoice_without_any_mention_still_fails(self):
         self.assertFalse(scoring.mentions_tax_point(
             "Faktura c. 123, castka 1000 Kc, splatnost 15.9.2026"))
+
+
+class NoTextLayerDateTests(unittest.TestCase):
+    """Doklad bez textové vrstvy: datum od modelu se označí (v0.6.2).
+
+    Guard proti vymyšlenému DUZP měl podmínku `and raw_text`, takže se
+    u obrázkového PDF vypnul — přesně tam, kde je model k vymýšlení
+    nejnáchylnější. Polská faktura PL26000900401 nese jen „1 wrz 2026"
+    a přesto z ní vyšla splatnost 30. 9. i DUZP 31. 8.
+    """
+
+    def _ohodnot(self, raw_text="", **pole):
+        inv = ExtractedInvoice()
+        for name, hodnota in pole.items():
+            setattr(inv, name, Field(hodnota, 0.9, SOURCE_VISION))
+        return inv, scoring.rescore(inv, raw_text)
+
+    def test_due_date_from_image_is_flagged(self):
+        inv, warnings = self._ohodnot(due_date=date(2026, 9, 30))
+        self.assertTrue(any("Splatnost" in w and "obrázku" in w.lower()
+                            for w in warnings), warnings)
+        # Hodnota ZŮSTÁVÁ — na obrázku datum být může, jen se to neověří.
+        self.assertEqual(inv.due_date.value, date(2026, 9, 30))
+        self.assertLessEqual(inv.due_date.confidence, 0.4)
+
+    def test_taxable_date_from_image_is_flagged(self):
+        inv, warnings = self._ohodnot(taxable_date=date(2026, 8, 31))
+        self.assertTrue(any("Datum plnění" in w for w in warnings), warnings)
+        self.assertEqual(inv.taxable_date.value, date(2026, 8, 31))
+
+    def test_document_with_text_is_not_flagged(self):
+        _, warnings = self._ohodnot(raw_text="Datum splatnosti 30.9.2026",
+                                    due_date=date(2026, 9, 30))
+        self.assertFalse(any("obrázku" in w.lower() for w in warnings), warnings)

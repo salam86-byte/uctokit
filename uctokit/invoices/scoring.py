@@ -93,6 +93,25 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
             )
             f.value, f.raw, f.confidence = None, None, 0.0
 
+        elif (name in ("due_date", "taxable_date")
+                and f.source in (SOURCE_LLM, SOURCE_VISION) and not raw_text):
+            # Doklad NEMÁ TEXTOVOU VRSTVU (sken, obrázkové PDF), takže se
+            # datum nedá proti ničemu ověřit — a `mentions_*` guard výš se
+            # kvůli podmínce `and raw_text` vypnul právě tam, kde je model
+            # k vymýšlení nejnáchylnější. Zahodit se to nesmí (na obrázku
+            # datum být MŮŽE), ale tvrdit, že je jisté, taky ne.
+            #
+            # Polská faktura PL26000900401 (nález 3. 9. 2026): doklad nese
+            # jen „1 wrz 2026", a přesto z toho vyšla splatnost 30. 9. i
+            # DUZP 31. 8. — obojí vymyšlené, a splatnost řídí platbu.
+            popisky = {"due_date": "Splatnost", "taxable_date": "Datum plnění"}
+            warnings.append(
+                f"{popisky[name]} '{f.value}' přečetl model z OBRÁZKU — "
+                f"doklad nemá textovou vrstvu, takže se to nedá ověřit. "
+                f"Zkontrolujte to prosím podle náhledu."
+            )
+            f.confidence = _clamp(min(base, 0.4))
+
         elif name in ("issue_date", "taxable_date", "due_date"):
             ok = V.date_sane(f.value)
             f.confidence = _clamp(base + (0.15 if ok else -0.3))
