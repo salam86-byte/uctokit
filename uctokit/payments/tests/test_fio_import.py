@@ -7,6 +7,7 @@ from decimal import Decimal
 from uctokit.payments.fio_import import (
     DomesticOrder,
     build_import_xml,
+    domestic_to_iban,
     iban_to_domestic,
     parse_import_response,
 )
@@ -63,6 +64,36 @@ class IbanToDomesticTests(unittest.TestCase):
     def test_non_cz_returns_none(self):
         self.assertIsNone(iban_to_domestic("SK9708000000191111111111"))
         self.assertIsNone(iban_to_domestic("nonsense"))
+
+
+class DomesticToIbanTests(unittest.TestCase):
+    def test_prefix_account_and_bank(self):
+        self.assertEqual(
+            domestic_to_iban("19-1111111111", "0800"), "CZ9708000000191111111111"
+        )
+
+    def test_bank_code_after_slash(self):
+        self.assertEqual(
+            domestic_to_iban("19-1111111111/0800"), "CZ9708000000191111111111"
+        )
+
+    def test_without_prefix(self):
+        self.assertEqual(
+            domestic_to_iban("1111111111", "0800"), "CZ1408000000001111111111"
+        )
+
+    def test_round_trip(self):
+        for number, bank in (("19-1111111111", "0800"), ("2100123456", "2010"),
+                             ("123456", "0100")):
+            iban = domestic_to_iban(number, bank)
+            self.assertEqual(iban_to_domestic(iban), (number, bank))
+
+    def test_garbage_returns_empty(self):
+        # Radši nic než špatný účet – volající pak QR platbu prostě nenabídne.
+        self.assertEqual(domestic_to_iban("nesmysl", "0800"), "")
+        self.assertEqual(domestic_to_iban("123", "08"), "")
+        self.assertEqual(domestic_to_iban("", "0800"), "")
+        self.assertEqual(domestic_to_iban("12345678901", "0800"), "")
 
 
 class ParseImportResponseTests(unittest.TestCase):
