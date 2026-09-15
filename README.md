@@ -12,8 +12,9 @@ v libovolné aplikaci.
   Heuristiky, validátory a scoring spolehlivosti.
 - **`uctokit.payments`** – Fio bankovní API: parsování výpisů a generování
   tuzemského importu příkazů (importIB XML), IBAN ↔ tuzemský účet.
-- **`uctokit.registry`** – ARES (ověření IČO) a MFČR (nespolehlivý plátce DPH,
-  zveřejněné bankovní účty).
+- **`uctokit.registry`** – ARES (ověření IČO), MFČR (nespolehlivý plátce DPH,
+  zveřejněné bankovní účty) a VIES (platnost DIČ v EU + komu patří, tedy
+  jediné ověření zahraničního dodavatele, který IČO nemá).
 
 ## Instalace
 
