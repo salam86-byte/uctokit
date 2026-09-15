@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 VIES_URL = "https://ec.europa.eu/taxation_customs/vies/rest-api/ms/{ms}/vat/{vat}"
 
@@ -46,6 +46,11 @@ class ViesResult:
     number: str = ""        # část za prefixem („5263736824")
     name: str = ""          # majitel DIČ; "" = stát ho nezveřejňuje
     address: str = ""       # jednořádkově; "" = nezveřejněno
+    # Adresa po řádcích, jak ji poslal národní registr. Zahraniční adresa
+    # se do jedné čárkové šňůry nevejde čitelně („ROOM806,ALUMNI INNOVATION
+    # CENTRE,NO.21XIONG CHU, 430000 WUHAN, CHINY" — čárky uvnitř si napsal
+    # úřad, ne my), a kdo z ní chce vytáhnout město a PSČ, potřebuje řádky.
+    address_lines: list = field(default_factory=list)
     error: str = ""         # proč se nedalo ověřit (kód z VIES / HTTP …)
 
     @property
@@ -70,13 +75,18 @@ def split_vat(vat_id) -> tuple[str, str]:
     return code, raw[2:]
 
 
-def _clean(value) -> str:
-    """Hodnota z VIES jednořádkově. „---" = stát údaj nezveřejňuje → ""."""
+def _lines(value) -> list:
+    """Hodnota z VIES po řádcích. „---" = stát údaj nezveřejňuje → []."""
     text = str(value or "").strip()
     if not text or set(text) <= {"-"}:
-        return ""
+        return []
     radky = [re.sub(r"\s+", " ", r).strip() for r in text.splitlines()]
-    return ", ".join(r for r in radky if r)
+    return [r for r in radky if r]
+
+
+def _clean(value) -> str:
+    """Hodnota z VIES jednořádkově. „---" = stát údaj nezveřejňuje → ""."""
+    return ", ".join(_lines(value))
 
 
 def _default_fetch(url: str):
@@ -111,8 +121,10 @@ def lookup_vat(vat_id, *, fetch=None) -> ViesResult:
     chyba = str(data.get("userError") or "").upper()
     if not valid and chyba not in _ANSWERED:
         return ViesResult(checked=False, error=chyba, **zaklad)
+    adresa = _lines(data.get("address"))
     return ViesResult(
         checked=True, valid=valid,
-        name=_clean(data.get("name")), address=_clean(data.get("address")),
+        name=_clean(data.get("name")),
+        address=", ".join(adresa), address_lines=adresa,
         **zaklad,
     )

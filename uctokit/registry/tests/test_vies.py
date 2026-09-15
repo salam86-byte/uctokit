@@ -90,3 +90,21 @@ class LookupVatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdresaPoRadcichTests(unittest.TestCase):
+    """Adresa z registru je víceřádková — kdo chce město a PSČ, potřebuje řádky."""
+
+    def _r(self):
+        return lookup_vat("PL5263736824", fetch=lambda url: (200, PLATNE))
+
+    def test_radky_zustanou_oddelene(self):
+        self.assertEqual(self._r().address_lines,
+                         ["ROOM 806", "430000 WUHAN", "CHINY"])
+
+    def test_jednoradkova_podoba_zustava(self):
+        self.assertEqual(self._r().address, "ROOM 806, 430000 WUHAN, CHINY")
+
+    def test_nezverejnena_adresa_nedava_radky(self):
+        r = lookup_vat("PL1234567890", fetch=lambda url: (200, NEPLATNE))
+        self.assertEqual(r.address_lines, [])
