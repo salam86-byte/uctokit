@@ -214,7 +214,7 @@ def _from_text(
                 + describe_llm_failure(extractor, exc)
             )
 
-    merged, merge_warnings = _merge(llm_inv, heur)
+    merged, merge_warnings = _merge(llm_inv, heur, text=raw_text or "")
     warnings.extend(merge_warnings)
     warnings.extend(rescore(merged, raw_text))
 
@@ -331,10 +331,37 @@ _FIELD_VALIDATORS = {
 }
 
 
-def _merge(llm_inv: ExtractedInvoice | None, heur: ExtractedInvoice):
-    """Sloučí LLM a heuristiku po polích. LLM vyhrává hodnotou; shoda zvedá důvěru."""
+def _merge(llm_inv: ExtractedInvoice | None, heur: ExtractedInvoice, text: str = ""):
+    """Sloučí LLM a heuristiku po polích. LLM vyhrává hodnotou; shoda zvedá důvěru.
+
+    Výjimka (v0.8.1): identita ODBĚRATELE z modelu se nebere. Když model
+    dá jako IČO dodavatele číslo, které doklad v návěští označuje jako
+    odběratelovo („IČO zákazníka : …"), vzal blok odběratele — a s ním
+    skoro jistě i název a DIČ. Ty se zahodí (název raději prázdný, HUB si
+    ho doplní z rejstříku podle IČO) a IČO/DIČ se vezmou z heuristiky,
+    která návěští zná. KB SmartPay / Worldline: zákazník v hlavičce vedle
+    čísla faktury, dodavatel jen v patičce malým písmem.
+    """
     result = ExtractedInvoice()
     warnings: list[str] = []
+
+    if llm_inv is not None and text:
+        from .heuristics import customer_icos
+
+        cizi = customer_icos(text)
+        llm_ico = _V.normalize_ico(str(llm_inv.supplier_ico.value or "")) \
+            if llm_inv.supplier_ico.is_present else ""
+        llm_dic = str(llm_inv.supplier_dic.value or "").upper() \
+            if llm_inv.supplier_dic.is_present else ""
+        dic_digits = _V.normalize_ico(llm_dic[2:]) if llm_dic[:2].isalpha() else ""
+        if cizi and (llm_ico in cizi or dic_digits in cizi):
+            warnings.append(
+                "Model vzal identitu odběratele (IČO/DIČ s popiskem zákazníka) "
+                "jako dodavatele — název, IČO i DIČ dodavatele se berou "
+                "z heuristiky, chybějící název doplní rejstřík."
+            )
+            llm_inv = replace_fields(llm_inv, supplier_name=Field(),
+                                     supplier_ico=Field(), supplier_dic=Field())
 
     for name, _ in result.items():
         lf = getattr(llm_inv, name) if llm_inv is not None else Field()
@@ -378,6 +405,14 @@ def _merge(llm_inv: ExtractedInvoice | None, heur: ExtractedInvoice):
         setattr(result, name, chosen)
 
     return result, warnings
+
+
+def replace_fields(inv: ExtractedInvoice, **fields) -> ExtractedInvoice:
+    """Kopie výsledku s přepsanými poli — původní objekt se nemění."""
+    out = ExtractedInvoice()
+    for name, f in inv.items():
+        setattr(out, name, fields.get(name, f))
+    return out
 
 
 def _resolve_llm(config: ExtractionConfig, override):

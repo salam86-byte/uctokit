@@ -16,6 +16,19 @@ from .types import Field, ExtractedInvoice, SOURCE_HEURISTIC
 BASE_CONFIDENCE = 0.5
 
 _ICO_RE = re.compile(r"I[ČC](?:O)?[:\s]*?(\d{8})", re.IGNORECASE)
+# IČO s popiskem ODBĚRATELE přímo v návěští: „IČO zákazníka : 27800334",
+# „IČ odběratele: …". Platební služby a telekomunikace (KB SmartPay /
+# Worldline) tak píší identitu zákazníka do hlavičky vedle čísla faktury,
+# zatímco sebe mají jen v patičce malým písmem — a model pak vezme za
+# dodavatele ten blok nahoře (v0.8.1). `_ICO_RE` tenhle tvar nechytá
+# (mezi „IČO" a číslem je slovo), takže heuristika ho nikdy za dodavatele
+# nevzala; tady se ale musí poznat, že hodnota je odběratelova, aby se
+# dala odmítnout, když ji přinese model nebo ji někdo hledá jako „jiné IČO".
+_CUSTOMER_ICO_RE = re.compile(
+    r"I[ČC](?:O)?\s*(?:z[áa]kazn[íi]ka|odb[ěe]ratele|kupuj[íi]c[íi]ho|"
+    r"pl[áa]tce|klienta)\s*:?\s*(\d{8})",
+    re.IGNORECASE,
+)
 # DIČ: dvoupísmenný kód země + identifikátor. České je „CZ" + 8 až 10 číslic
 # (u fyzické osoby rodné číslo), zahraniční mívá i písmena. Hranice slova
 # vpředu, ať se „DIČ" nechytne uprostřed jiného slova.
@@ -225,14 +238,38 @@ def _supplier_dic_match(text: str, ico_match):
     return min(matches, key=lambda m: abs(m.start() - ico_match.start()))
 
 
+def customer_icos(text: str) -> set[str]:
+    """IČO označená v návěští jako odběratelova („IČO zákazníka : …")."""
+    return {V.normalize_ico(m.group(1)) for m in _CUSTOMER_ICO_RE.finditer(text or "")}
+
+
+def labeled_icos(text: str) -> list[str]:
+    """IČO s popiskem IČ/IČO v pořadí výskytu, bez těch odběratelových.
+
+    Pro volající, kteří hledají „jiné IČO v dokumentu": holé osmimístné číslo
+    projde kontrolním součtem v desetině případů (TID terminálu, číslo
+    objednávky), kdežto číslo s popiskem je IČO skoro jistě.
+    """
+    cizi = customer_icos(text)
+    out = []
+    for m in _ICO_RE.finditer(text or ""):
+        v = V.normalize_ico(m.group(1))
+        if v and v not in cizi and v not in out:
+            out.append(v)
+    return out
+
+
 def _supplier_ico_match(text: str):
     """Vybere IČO dodavatele, i když PDF promíchá dva sloupce.
 
     U layoutu s oběma nadpisy ``Dodavatel``/``Odběratel`` bývá IČO
     dodavatele blíž jeho bankovnímu účtu. Mimo tento konkrétní layout
-    zachováváme bezpečné původní chování a vezmeme první IČO.
+    zachováváme bezpečné původní chování a vezmeme první IČO. Číslo
+    s návěštím odběratele („IČO zákazníka") se nebere nikdy.
     """
-    matches = list(_ICO_RE.finditer(text))
+    cizi = customer_icos(text)
+    matches = [m for m in _ICO_RE.finditer(text)
+               if V.normalize_ico(m.group(1)) not in cizi]
     if len(matches) < 2:
         return matches[0] if matches else None
     lowered = text.lower()

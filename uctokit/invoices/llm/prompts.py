@@ -59,6 +59,16 @@ SYSTEM_PROMPT = (
     "sekci Dodavatel od Odběratel/Plátce a neber údaje našeho klubu z odběratele. "
     "Dodavatel je ta strana, na jejíž bankovní účet se platí (peníze jdou jemu); "
     "odběratel/plátce je náš klub – jeho název, IČO ani adresu nikam nedávej. "
+    # KB SmartPay / Worldline (v0.8.1): odběratel má adresu velkým nahoře
+    # a jeho IČO/DIČ stojí u čísla faktury s popiskem „zákazníka";
+    # dodavatel je jen v patičce malým písmem a v hlavičce má LOGO.
+    "Popisky „IČO zákazníka“, „DIČ zákazníka“, „Číslo zákazníka“, „Odběratel“, "
+    "„Plátce“, „Kupující“ označují ODBĚRATELE – ty hodnoty (ani firmu s adresou "
+    "nad nimi) nikdy nedávej do supplier_*. Dodavatel (vystavitel) bývá u bank, "
+    "platebních služeb a telekomunikací uveden JEN V PATIČCE malým písmem: "
+    "obchodní firma, IČ, DIČ, zápis v rejstříku, účet – hledej ho tam, když "
+    "v hlavičce žádný blok Dodavatel není. Logo nebo obchodní značka v hlavičce "
+    "(např. „KB SmartPay“) NENÍ název dodavatele; použij právní název od IČ. "
     "Datum vystavení nezaměň s datem v patě, rejstříku ani s DUZP — to patří "
     "do taxable_date. U XLSX mohou být číslo účtu a kód banky v oddělených "
     "buňkách.\n"
