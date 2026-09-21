@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from .validators import dic_country
+
 # Kanonický seznam polí, která z faktury vytěžujeme. Pořadí = pořadí v UI.
 FIELD_NAMES: tuple[str, ...] = (
     "supplier_name",
@@ -142,6 +144,15 @@ class ExtractedInvoice:
     # Takový doklad legitimně nemá účet, VS ani splatnost – ať se to nehodnotí
     # jako chybějící data ani nesráží jistotu.
     payment_in_cash: bool = False
+
+    # Zahraniční dodavatel — podle kódu země v DIČ (DE…, PL…, SK…). Není to
+    # pole, ale odpověď na otázku, která pole od dokladu vůbec čekat: IČO je
+    # český identifikátor a variabilní symbol česká platební konvence, takže
+    # na německé faktuře NECHYBÍ — nejsou tam. Bez DIČ se původ dodavatele
+    # nepozná a doklad se hodnotí jako tuzemský.
+    @property
+    def foreign_supplier(self) -> bool:
+        return dic_country(self.supplier_dic.value) not in ("", "CZ")
 
     def items(self):
         """Iteruje ``(název_pole, Field)`` v kanonickém pořadí."""

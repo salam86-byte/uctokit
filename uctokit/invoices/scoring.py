@@ -129,16 +129,50 @@ def rescore(inv: ExtractedInvoice, raw_text: str | None) -> list[str]:
     return warnings
 
 
-def overall_confidence(inv: ExtractedInvoice) -> float:
-    """Průměr jistot klíčových polí, které rozhodují o zaplatitelnosti faktury."""
-    key_fields = ("supplier_name", "supplier_ico", "total_amount", "variable_symbol", "due_date")
-    # Hotovostní doklad nemá VS ani splatnost (platí se na místě) – nesmí ho to
-    # táhnout dolů jako „chybějící data". Rozhoduje jen dodavatel + částka.
-    if inv.payment_in_cash:
-        key_fields = ("supplier_name", "supplier_ico", "total_amount")
-    scores = [getattr(inv, name).confidence for name in key_fields]
+# Klíčová pole, ze kterých se skládá celková jistota: to, co rozhoduje
+# o zaplatitelnosti faktury. Dělí se jejich POČTEM, takže chybějící pole
+# táhne průměr dolů jako nula.
+KEY_FIELDS = ("supplier_name", "supplier_ico", "total_amount",
+              "variable_symbol", "due_date")
+
+
+def key_fields(*, cash: bool = False, foreign: bool = False) -> tuple[str, ...]:
+    """Klíčová pole pro daný druh dokladu — bez těch, která na něm nejsou.
+
+    Hotovostní doklad nemá VS ani splatnost (platí se na místě). Zahraniční
+    dodavatel nemá IČO (český identifikátor) ani variabilní symbol (česká
+    platební konvence). Pole, které na dokladu z principu není, se nesmí
+    počítat jako chybějící: dokonale vytěžená německá faktura tak končila
+    na 59 % (3 × 0,99 / 5) — pod prahem kontroly i pod prahem vision
+    fallbacku, který se kvůli tomu spouštěl pokaždé a zbytečně.
+    """
+    fields = KEY_FIELDS
+    if cash:
+        fields = tuple(f for f in fields if f not in ("variable_symbol", "due_date"))
+    if foreign:
+        fields = tuple(f for f in fields if f not in ("supplier_ico", "variable_symbol"))
+    return fields
+
+
+def overall_from_confidences(confidences, *, cash: bool = False,
+                             foreign: bool = False) -> float:
+    """Celková jistota ze slovníku ``{pole: jistota}``.
+
+    Průměr klíčových polí, kde CHYBĚJÍCÍ pole (jistota 0) táhne průměr dolů
+    — dělí se počtem polí, ne počtem přítomných. Slovníková podoba je tu pro
+    konzumenty, kteří jistoty polí ještě upravují (HUB zvedá pole potvrzená
+    pamětí dodavatele) a pak potřebují TÝŽ vzorec znovu — ne jeho opis.
+    """
+    fields = key_fields(cash=cash, foreign=foreign)
+    scores = [float((confidences or {}).get(f) or 0.0) for f in fields]
     present = [s for s in scores if s > 0]
     if not present:
         return 0.0
-    # Chybějící klíčové pole táhne průměr dolů (počítá se jako 0).
-    return round(sum(present) / len(key_fields), 3)
+    return round(sum(present) / len(fields), 3)
+
+
+def overall_confidence(inv: ExtractedInvoice) -> float:
+    """Průměr jistot klíčových polí, které rozhodují o zaplatitelnosti faktury."""
+    return overall_from_confidences(
+        {name: f.confidence for name, f in inv.items()},
+        cash=inv.payment_in_cash, foreign=inv.foreign_supplier)

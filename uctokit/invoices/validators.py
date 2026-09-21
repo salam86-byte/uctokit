@@ -94,6 +94,19 @@ def normalize_dic(raw) -> str:
     return text if re.fullmatch(r"[A-Z]{2}[0-9A-Z]{6,14}", text) else ""
 
 
+def dic_country(raw) -> str:
+    """Kód země z DIČ („DE 216 817 039" → „DE"). „" = DIČ bez prefixu země.
+
+    Bere jen to, co na dokladu stojí — dvě písmena před číslem — a neověřuje,
+    že je to existující stát (na to je VIES). Odpovídá na levnou otázku
+    „je dodavatel tuzemský?", která rozhoduje, jestli od dokladu vůbec čekat
+    IČO a variabilní symbol.
+    """
+    text = normalize_dic(raw)
+    # Bez číslice to není DIČ, ale slovo s velkými písmeny („JENOMTEXTU").
+    return text[:2] if text and re.search(r"\d", text[2:]) else ""
+
+
 def normalize_vs(raw) -> str:
     return re.sub(r"\D", "", str(raw or ""))[:10]
 
