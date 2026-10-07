@@ -155,16 +155,27 @@ def key_fields(*, cash: bool = False, foreign: bool = False) -> tuple[str, ...]:
 
 
 def overall_from_confidences(confidences, *, cash: bool = False,
-                             foreign: bool = False) -> float:
+                             foreign: bool = False, paid: bool = False) -> float:
     """Celková jistota ze slovníku ``{pole: jistota}``.
 
     Průměr klíčových polí, kde CHYBĚJÍCÍ pole (jistota 0) táhne průměr dolů
     — dělí se počtem polí, ne počtem přítomných. Slovníková podoba je tu pro
     konzumenty, kteří jistoty polí ještě upravují (HUB zvedá pole potvrzená
     pamětí dodavatele) a pak potřebují TÝŽ vzorec znovu — ne jeho opis.
+
+    Doklad celý uhrazený zálohou (``paid``): k úhradě zbývá nula, takže
+    VS ani splatnost nemají k čemu sloužit — CHYBĚJÍCÍ se nepočítají.
+    Na rozdíl od hotovosti se ale počítají, když na dokladu jsou: e-shop
+    s platbou předem je mívá (jistota by klesla z 89 % na 83 %, kdyby se vyřadily).
+    Servisní doklad Tesly bez nich končil na 44 % a vision fallback,
+    spuštěný kvůli tomu, si VS vymyslel.
     """
+    confidences = confidences or {}
     fields = key_fields(cash=cash, foreign=foreign)
-    scores = [float((confidences or {}).get(f) or 0.0) for f in fields]
+    if paid:
+        fields = tuple(f for f in fields
+                       if f not in ("variable_symbol", "due_date") or confidences.get(f))
+    scores = [float(confidences.get(f) or 0.0) for f in fields]
     present = [s for s in scores if s > 0]
     if not present:
         return 0.0
@@ -175,4 +186,5 @@ def overall_confidence(inv: ExtractedInvoice) -> float:
     """Průměr jistot klíčových polí, které rozhodují o zaplatitelnosti faktury."""
     return overall_from_confidences(
         {name: f.confidence for name, f in inv.items()},
-        cash=inv.payment_in_cash, foreign=inv.foreign_supplier)
+        cash=inv.payment_in_cash, foreign=inv.foreign_supplier,
+        paid=inv.fully_paid)

@@ -16,7 +16,9 @@ Oba deskriptory mohou být i spojené v jednom kódu; parsujeme sjednocení klí
 from __future__ import annotations
 
 import io
+import re
 from datetime import date
+from urllib.parse import unquote
 
 from . import validators as V
 from .types import SOURCE_QR, ExtractedInvoice, Field, SourceDocument
@@ -50,15 +52,44 @@ def parse_spayd(payload: str) -> ExtractedInvoice | None:
     if not (text[:4].upper() in ("SPD*", "SID*")):
         return None
 
-    data: dict[str, str] = {}
-    for token in text.split("*"):
-        key, sep, val = token.partition(":")
-        if not sep:  # hlavička deskriptoru (SPD/SID) nebo verze (1.0) – bez ":"
-            continue
-        key, val = key.strip().upper(), val.strip()
-        if key and val:
-            data.setdefault(key, val)  # první výskyt vyhrává (SPD před SID)
+    outer = _parse_tokens(text)
+    data = dict(outer)
+    # QR Platba + F: hlavička faktury (SID) jede uvnitř platby jako hodnota
+    # klíče `X-INV`, a protože by se jinak tloukla s oddělovačem SPAYD, je
+    # v ní hvězdička zakódovaná jako `%2A`. Bez rozbalení z kódu zbyla jen
+    # platba — číslo faktury, datum vystavení, IČO i DUZP se zahodily
+    # (FakturaOnline, říjen 2026: sken bez textové vrstvy, kde je QR
+    # jediný strojově čitelný zdroj). Vnější platba má přednost
+    # (`setdefault`), SID jen doplňuje, co v ní není.
+    inner = outer.get("X-INV")
+    if inner:
+        # Rozbalit jen hvězdičky — hodnoty uvnitř se dekódují níž spolu se
+        # vším ostatním, ať se nic nedekóduje dvakrát.
+        for key, val in _parse_tokens(re.sub(r"%2A", "*", inner, flags=re.I)).items():
+            data.setdefault(key, val)
 
+    inv = _build(_decoded(data))
+    # Která pole dala JEN vnořená hlavička. Ta údaje DOPLŇUJE, řízení
+    # vytěžení nemění: hodnotu z textu nepřebije a AI se kvůli ní
+    # nevynechává (`pipeline._apply_qr`, `_qr_covers_invoice`) — dokud se
+    # nečetla, běžel u takových dokladů model vždy a bral se text. Příklad,
+    # proč na tom záleží: betonárna má na dokladu „Číslo: 2026000123",
+    # v kódu interní „VF12-262026000123".
+    vnejsi = _build(_decoded(outer)) if inner else inv
+    inv.qr_nested_fields = frozenset(
+        name for name, f in inv.items()
+        if f.is_present and not getattr(vnejsi, name).is_present)
+    return inv
+
+
+def _decoded(data: dict[str, str]) -> dict[str, str]:
+    """Hodnoty smí být URL-kódované (UTF-8): jméno příjemce od živnostníka
+    přišlo jako „Ji%C5%99%C3%AD …" a tak se i uložilo. `unquote` nechává neplatné sekvence („sleva 10%") být."""
+    return {key: unquote(val) for key, val in data.items()}
+
+
+def _build(data: dict[str, str]) -> ExtractedInvoice:
+    """Pole faktury z rozparsovaných klíčů SPAYD/SID."""
     inv = ExtractedInvoice()
 
     acc = data.get("ACC")  # IBAN, případně "IBAN+BIC"
@@ -103,15 +134,34 @@ def parse_spayd(payload: str) -> ExtractedInvoice | None:
     if number:
         inv.invoice_number = Field(number, 0.9, SOURCE_QR, number)
 
+    # Jen `INI`/`VII` = dodavatel. `INR`/`VIR` jsou IČO a DIČ ODBĚRATELE,
+    # tedy naše — v kódu bývají obě dvojice vedle sebe.
     ico = V.normalize_ico(data.get("INI") or "")
     if ico:
         inv.supplier_ico = Field(ico, 0.95 if V.valid_ico(ico) else 0.55, SOURCE_QR, ico)
+
+    dic = V.normalize_dic(data.get("VII") or "")
+    if dic:
+        inv.supplier_dic = Field(dic, 0.9, SOURCE_QR, data.get("VII"))
 
     name = data.get("RN")  # jméno příjemce platby = dodavatel
     if name:
         inv.supplier_name = Field(name, 0.85, SOURCE_QR, name)
 
     return inv
+
+
+def _parse_tokens(text: str) -> dict[str, str]:
+    """`KLÍČ:hodnota` páry oddělené hvězdičkou; první výskyt klíče vyhrává."""
+    data: dict[str, str] = {}
+    for token in (text or "").split("*"):
+        key, sep, val = token.partition(":")
+        if not sep:  # hlavička deskriptoru (SPD/SID) nebo verze (1.0) – bez ":"
+            continue
+        key, val = key.strip().upper(), val.strip()
+        if key and val:
+            data.setdefault(key, val)  # první výskyt vyhrává (SPD před SID)
+    return data
 
 
 def _iban_to_domestic(iban: str) -> str | None:

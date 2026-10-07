@@ -145,6 +145,23 @@ class ExtractedInvoice:
     # jako chybějící data ani nesráží jistotu.
     payment_in_cash: bool = False
 
+    # Kolik po odpočtu zaplacené zálohy zbývá uhradit (metadata, ne pole).
+    # ``None`` = doklad o odpočtu nic neříká a platí se celá částka. Plní se
+    # jen tam, kde to doklad ŘÍKÁ — celková cena, zaplacená záloha a „k úhradě"
+    # na sebe sedí (viz ``heuristics.prepaid_total``).
+    amount_due: Decimal | None = None
+
+    @property
+    def fully_paid(self) -> bool:
+        """Celý doklad pokryla zaplacená záloha — k úhradě nezbývá nic.
+
+        Jako u hotovosti: VS ani splatnost na takovém dokladu nechybí,
+        nejsou potřeba, protože se nic neplatí.
+        """
+        total = self.total_amount.value if self.total_amount.is_present else None
+        return (self.amount_due is not None and self.amount_due == 0
+                and isinstance(total, Decimal) and total > 0)
+
     # Zahraniční dodavatel — podle kódu země v DIČ (DE…, PL…, SK…). Není to
     # pole, ale odpověď na otázku, která pole od dokladu vůbec čekat: IČO je
     # český identifikátor a variabilní symbol česká platební konvence, takže

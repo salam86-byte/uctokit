@@ -43,6 +43,14 @@ class AresTests(unittest.TestCase):
         self.assertEqual(result.dic, "CZ12345679")
         self.assertIn("Praha", result.address)
 
+    def test_vat_group_member(self):
+        # Člen skupiny DPH: vlastní `dic` prázdné, skupinové v `dicSkDph`.
+        r = _lookup('{"ico":"12345679","obchodniJmeno":"Člen skupiny a.s.",'
+                    '"dicSkDph":"CZ699000001","sidlo":{}}')
+        self.assertEqual(r.dic, "")
+        self.assertEqual(r.vat_group_dic, "CZ699000001")
+        self.assertEqual(_lookup(ARES_JSON).vat_group_dic, "")
+
     def test_not_found_404(self):
         self.assertFalse(lookup_ico("12345678", fetch=lambda url: (404, "")).found)
 

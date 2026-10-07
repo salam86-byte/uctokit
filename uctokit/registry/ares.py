@@ -19,6 +19,11 @@ class AresResult:
     ico: str = ""
     name: str = ""
     dic: str = ""
+    # DIČ skupiny (skupinová registrace k DPH, „CZ699…"). Člen skupiny má
+    # v ARES `dic` PRÁZDNÉ a na faktuře uvádí právě tohle — KB i Worldline
+    # (obě pod jedním `dicSkDph`). Kdo by z prázdného `dic` usoudil
+    # „neplátce", smazal by správné DIČ.
+    vat_group_dic: str = ""
     address: str = ""
     # Adresa po částech – ARES ji v ``sidlo`` má strukturovaně, takže není
     # důvod rozebírat ``textovaAdresa`` řetězcem. Konzument je může nabídnout
@@ -81,6 +86,7 @@ def lookup_ico(ico, *, fetch=None) -> AresResult:
         ico=str(data.get("ico") or digits),
         name=data.get("obchodniJmeno", "") or "",
         dic=data.get("dic", "") or "",
+        vat_group_dic=data.get("dicSkDph", "") or "",
         address=sidlo.get("textovaAdresa", "") or "",
         street=_street_from(sidlo),
         # Obec, ne městský obvod: „Ostrava" (ne „Vítkovice"), „Praha"

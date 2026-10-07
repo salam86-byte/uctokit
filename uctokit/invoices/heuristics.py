@@ -110,6 +110,71 @@ _XLSX_HEADER_SUPPLIER_RE = re.compile(
 )
 
 
+# Doklad vystavený AŽ PO zaplacení předem (servis Tesla placený v aplikaci,
+# e-shop s platbou předem, vyúčtování celé pokryté zálohou):
+#
+#     Celková cena vč. DPH (CZK)   1,815.00
+#     Zaplacená záloha             1,815.00
+#     Celkem k úhradě                  0.00
+#
+#     Celkem za fakturu:           500,00   105,00   605,00 Kč
+#     Přijatá úplata v.s.: 2026000999  21  500,00  105,00  605,00 Kč
+#     Celkem k úhradě                                    0,00 Kč
+#
+# „K úhradě" je nula, a tu bere heuristika i model jako částku faktury —
+# doklad na 1 815 Kč pak vypadá jako prázdný a jistota padá na „nulovou
+# částku" (model přitom mezi dvěma běhy vrátil u e-shopu jednou celou
+# částku a jednou 0). Částka se proto bere z řádku celkové ceny, ale JEN když
+# se všechny tři řádky shodnou (zaplaceno = celkem, k úhradě = 0): jediný
+# z nich nic nedokazuje, „celkem vč. DPH" mívá každá faktura.
+#
+# Řádky bývají tabulkové (základ, DPH, s DPH vedle sebe), takže se berou
+# VŠECHNY částky z řádku a hledá se ta, která stojí na obou: sloučení
+# sazby se základem („21 500,00") nebo VS z řádku zálohy na druhém řádku
+# nebude. Smí mít i anglické oddělovače (1,815.00) — Tesla, Stripe a spol.
+# Tisíce dělí i nezlomitelné mezery (U+00A0 z českého formátování, úzká
+# U+202F a U+2009): neznámý oddělovač by „1 815,00" rozdělil na „1"
+# a „815,00" na OBOU řádcích a průnik by vrátil 815,00.
+_LINE_AMOUNT_RE = re.compile(
+    r"-?(?:\d{1,3}(?:[ .,\u00a0\u202f\u2009]\d{3})+|\d+)(?:[.,]\d{2})?")
+_GROSS_TOTAL_RE = re.compile(
+    r"(?:celkov[áa]\s+(?:cena|částka)|celkem)\s+(?:vč\.?|včetně|s)\s*DPH"
+    r"|celkem\s+za\s+(?:fakturu|doklad)", re.IGNORECASE)
+_ADVANCE_PAID_RE = re.compile(
+    r"(?:zaplacen\w*|uhrazen\w*|přijat\w*)\s+(?:záloh\w*|úplat\w*)"
+    r"|odpočet\s+záloh\w*|záloh\w*\s+(?:zaplacen|uhrazen)\w*", re.IGNORECASE)
+_PAYABLE_RE = re.compile(
+    r"k\s+úhradě|zbývá\s+(?:k\s+)?(?:uhradit|úhradě|zaplatit)", re.IGNORECASE)
+
+
+def _line_amounts(rx, text: str) -> set:
+    """Všechny částky z řádků s popiskem ``rx`` (za popiskem, bez znaménka)."""
+    out = set()
+    for line in (text or "").splitlines():
+        m = rx.search(line)
+        if not m:
+            continue
+        for token in _LINE_AMOUNT_RE.findall(line[m.end():]):
+            value = V.normalize_amount(token)
+            if value is not None:
+                out.add(abs(value))
+    return out
+
+
+def prepaid_total(text: str):
+    """Celková částka dokladu celého uhrazeného zálohou, jinak ``None``.
+
+    Vrací ``Decimal`` jen když doklad říká obojí: že zaplacená záloha
+    pokryla celou cenu, a že k úhradě zbývá nula.
+    """
+    payable = _line_amounts(_PAYABLE_RE, text)
+    if not payable or any(a != 0 for a in payable):
+        return None
+    shoda = sorted((_line_amounts(_GROSS_TOTAL_RE, text)
+                    & _line_amounts(_ADVANCE_PAID_RE, text)) - {0})
+    return shoda[-1] if shoda else None
+
+
 def _field(value, raw=None) -> Field:
     if value in (None, ""):
         return Field()
@@ -145,7 +210,11 @@ def extract_from_text(text: str, source: str = SOURCE_HEURISTIC) -> ExtractedInv
         raw_account = f"{separate_account.group(1)}/{separate_account.group(2)}"
         inv.supplier_account = _field(V.normalize_account(raw_account), raw=raw_account)
     else:
-        account = _ACCOUNT_RE.search(text)
+        # Jen číslo, které projde kontrolní číslicí: tvar „číslo/čtyři
+        # číslice" má i odkaz na předpis — „vyhláška 358/2013 Sb." se na
+        # dokladu ČÚZK vytěžila jako účet.
+        account = next((m for m in _ACCOUNT_RE.finditer(text)
+                        if V.valid_cz_account(m.group(0))), None)
         if account:
             inv.supplier_account = _field(V.normalize_account(account.group(0)), raw=account.group(0))
 

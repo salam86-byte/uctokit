@@ -14,7 +14,7 @@ from . import pdf_text as _pdf
 from . import qr as _qr
 from . import validators as _V
 from . import xlsx_text as _xlsx
-from .heuristics import extract_from_text
+from .heuristics import extract_from_text, prepaid_total
 from .isdoc import parse_isdoc
 from .llm.base import LLMConfig, LLMInvoiceExtractor, build_provider
 from .scoring import overall_confidence, rescore
@@ -128,7 +128,15 @@ def _qr_covers_payment(qr: ExtractedInvoice) -> bool:
 
 
 def _qr_covers_invoice(qr: ExtractedInvoice) -> bool:
-    """QR má platbu i identitu dokladu, takže AI už nemá co podstatného doplnit."""
+    """QR má platbu i identitu dokladu, takže AI už nemá co podstatného doplnit.
+
+    Jen skutečná QR Faktura (SID). Hlavička vnořená v QR Platbě + F
+    (`X-INV`, v0.12.0) údaje doplní, ale AI se kvůli ní nevynechává: dokud
+    se nečetla, model u takových dokladů běžel vždy — a dodával název
+    v plném znění (QR ho nese oříznutý verzálkami) a číslo faktury z papíru.
+    """
+    if getattr(qr, "qr_nested_fields", None):
+        return False
     has_supplier = qr.supplier_name.is_present or qr.supplier_ico.is_present
     return (
         _qr_covers_payment(qr)
@@ -157,6 +165,13 @@ def _apply_qr(result: ExtractionResult, qr: ExtractedInvoice) -> ExtractionResul
         # délku — pokud už název máme z bohatšího zdroje (text/LLM/ISDOC),
         # NEPŘEPISUJ ho. QR název slouží jen jako záloha, když jinde není.
         if name in _QR_NAME_KEEP and existing.is_present:
+            continue
+        # Údaj z hlavičky vnořené v platbě (QR Platba + F) jen DOPLŇUJE —
+        # hodnotu z textu nepřebije. Do v0.12.0 se vnořená hlavička nečetla
+        # a u těchhle dokladů se bral vždy text; číslo faktury v ní navíc
+        # bývá interní („VF12-262026000123" proti „2026000123" na papíře).
+        # Samotná QR Faktura (SID) přebíjí dál, jako dřív.
+        if existing.is_present and name in getattr(qr, "qr_nested_fields", ()):
             continue
         if existing.is_present and not _values_agree(name, existing.value, qf.value):
             warnings.append(
@@ -216,6 +231,7 @@ def _from_text(
 
     merged, merge_warnings = _merge(llm_inv, heur, text=raw_text or "")
     warnings.extend(merge_warnings)
+    _apply_prepaid(merged, raw_text or "")
     warnings.extend(rescore(merged, raw_text))
 
     method = method_with_llm if llm_used else method_plain
@@ -228,6 +244,25 @@ def _from_text(
         warnings=warnings,
         raw_text=raw_text or None,
     )
+
+
+def _apply_prepaid(inv: ExtractedInvoice, text: str) -> None:
+    """Doklad celý uhrazený zálohou: částka = cena vč. DPH, k úhradě 0.
+
+    Přepisuje se jen nula (nebo prázdno) — tu na takovém dokladu vytěžilo
+    „k úhradě". Jinou nenulovou částku od modelu nechává být: tři řádky,
+    které na sebe sedí, jsou silný doklad, ale ne silnější než rozpor,
+    na který se má podívat člověk.
+    """
+    total = prepaid_total(text)
+    if total is None:
+        return
+    current = inv.total_amount.value if inv.total_amount.is_present else None
+    if current not in (None, Decimal("0.00"), total):
+        return
+    if current != total:
+        inv.total_amount = Field(total, 0.75, SOURCE_HEURISTIC, str(total))
+    inv.amount_due = Decimal("0.00")
 
 
 def _from_scan(document, raw_text, extractor, config) -> ExtractionResult:

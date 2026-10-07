@@ -45,6 +45,36 @@ class ParseSpaydTests(unittest.TestCase):
         self.assertGreater(inv.supplier_ico.confidence, 0.9)
         self.assertEqual(inv.variable_symbol.value, "12345")
 
+    def test_qr_platba_f_nested_invoice(self):
+        # QR Platba + F: SID uvnitř platby jako `X-INV` s hvězdičkou `%2A`.
+        payload = (
+            "SPD*1.0*AM:1234.50*MSG:FA2026007*X-VS:2026007*CC:CZK"
+            "*ACC:CZ6706000000001111111111*X-INV:SID%2A1.0%2AID:FA2026007"
+            "%2ADD:20261007%2AINI:12345679%2AVII:CZ12345679%2AINR:87654321"
+            "%2AVIR:CZ87654321%2ADUZP:20261005%2AAM:1.00%2AX-SW:Test*"
+        )
+        inv = qr.parse_spayd(payload)
+        self.assertEqual(inv.invoice_number.value, "FA2026007")
+        self.assertEqual(inv.issue_date.value, date(2026, 10, 7))
+        self.assertEqual(inv.taxable_date.value, date(2026, 10, 5))
+        # Dodavatel z INI/VII, nikdy odběratel z INR/VIR.
+        self.assertEqual(inv.supplier_ico.value, "12345679")
+        self.assertEqual(inv.supplier_dic.value, "CZ12345679")
+        # Vnější platba má přednost před částkou ze SID.
+        self.assertEqual(inv.total_amount.value, Decimal("1234.50"))
+        self.assertEqual(inv.variable_symbol.value, "2026007")
+
+    def test_url_encoded_values_are_decoded(self):
+        inv = qr.parse_spayd(
+            "SPD*1.0*ACC:CZ6706000000001111111111*AM:10*RN:Ji%C5%99%C3%AD%20Vzor*MSG:sleva 10%")
+        self.assertEqual(inv.supplier_name.value, "Jiří Vzor")
+
+    def test_customer_ids_are_not_supplier(self):
+        inv = qr.parse_spayd(
+            "SID*1.0*ID:1*INR:12345679*VIR:CZ12345679*AM:10")
+        self.assertFalse(inv.supplier_ico.is_present)
+        self.assertFalse(inv.supplier_dic.is_present)
+
     def test_prefixed_account(self):
         # Předčíslí účtu v IBAN (pozice 9–14).
         inv = qr.parse_spayd("SPD*1.0*ACC:CZ9708000000191111111111*AM:10*CC:CZK")
@@ -124,6 +154,17 @@ class QrInPipelineTests(unittest.TestCase):
             P.extract(SourceDocument(b"%PDF", "faktura.pdf"), llm=llm)
         self.assertEqual(llm.text_calls, 0)
 
+    def test_nested_header_does_not_skip_llm(self):
+        # QR Platba + F nese i kompletní hlavičku, ale AI se kvůli ní
+        # nevynechává — dokud se nečetla, model u takových dokladů běžel.
+        vnorena = qr.parse_spayd(
+            "SPD*1.0*ACC:CZ6706000000001111111111*AM:100*CC:CZK*DT:20260215"
+            "*RN:VZOROVY DODAVATEL*X-INV:SID%2A1.0%2AID:FA-1%2ADD:20260201"
+            "%2AINI:12345679"
+        )
+        self.assertEqual(vnorena.invoice_number.value, "FA-1")
+        self.assertFalse(P._qr_covers_invoice(vnorena))
+
     def test_partial_qr_does_not_skip_ai_but_wins_values(self):
         # QR nese jen částku (ne účet) → AI se nepřeskočí, ale QR přebije hodnotu.
         partial = ExtractedInvoice()
@@ -164,6 +205,48 @@ class QrInPipelineTests(unittest.TestCase):
             merged.invoice.supplier_name.value, "Čerpací karty s.r.o., odštěpný závod"
         )
         self.assertEqual(merged.invoice.variable_symbol.value, "2640173")
+
+    def test_nested_number_does_not_override_printed_one(self):
+        # Hlavička v QR Platbě + F: `ID` bývá interní označení — na papíře
+        # „2026000123", v kódu „VF12-262026000123". Bez čísla z textu se ale vezme.
+        vnorena = qr.parse_spayd(
+            "SPD*1.0*ACC:CZ6706000000001111111111*AM:10"
+            "*X-INV:SID%2A1.0%2AID:VF12-262026000123")
+        base = P.ExtractionResult(invoice=ExtractedInvoice(), method="pdf-text")
+        base.invoice.invoice_number = Field("2026000123", 0.85, "llm")
+        merged = P._apply_qr(base, vnorena)
+        self.assertEqual(merged.invoice.invoice_number.value, "2026000123")
+
+        empty = P.ExtractionResult(invoice=ExtractedInvoice(), method="pdf-text")
+        merged = P._apply_qr(empty, vnorena)
+        self.assertEqual(merged.invoice.invoice_number.value, "VF12-262026000123")
+
+    def test_nested_fields_only_fill_gaps(self):
+        # Vnořená hlavička nepřebije nic z textu — ani DUZP, ani IČO; jen
+        # doplní, co text nemá. Vnější platba (VS) přebíjí jako dřív.
+        from datetime import date as d
+
+        vnorena = qr.parse_spayd(
+            "SPD*1.0*ACC:CZ6706000000001111111111*AM:10*X-VS:777"
+            "*X-INV:SID%2A1.0%2ADUZP:20261005%2AINI:12345679%2ADD:20261007")
+        self.assertEqual(vnorena.qr_nested_fields,
+                         {"taxable_date", "supplier_ico", "issue_date"})
+        base = P.ExtractionResult(invoice=ExtractedInvoice(), method="pdf-text")
+        base.invoice.taxable_date = Field(d(2026, 9, 30), 0.87, "llm")
+        base.invoice.variable_symbol = Field("123", 0.87, "llm")
+        merged = P._apply_qr(base, vnorena).invoice
+        self.assertEqual(merged.taxable_date.value, d(2026, 9, 30))
+        self.assertEqual(merged.supplier_ico.value, "12345679")       # doplněno
+        self.assertEqual(merged.issue_date.value, d(2026, 10, 7))     # doplněno
+        self.assertEqual(merged.variable_symbol.value, "777")         # platba přebíjí
+
+    def test_plain_sid_number_still_wins(self):
+        # Samotná QR Faktura přebíjí číslo z textu jako dřív.
+        sid = qr.parse_spayd("SID*1.0*ID:FA-2026-7*AM:10")
+        base = P.ExtractionResult(invoice=ExtractedInvoice(), method="pdf-text")
+        base.invoice.invoice_number = Field("2026007", 0.85, "llm")
+        merged = P._apply_qr(base, sid)
+        self.assertEqual(merged.invoice.invoice_number.value, "FA-2026-7")
 
 
 if __name__ == "__main__":

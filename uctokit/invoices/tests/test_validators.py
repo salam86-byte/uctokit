@@ -68,6 +68,25 @@ class TextChecksTests(unittest.TestCase):
     def test_amount_in_text_grouped(self):
         self.assertTrue(V.amount_in_text(Decimal("13000.00"), "Celkem 13 000,00 Kč"))
 
+    def test_valid_cz_account(self):
+        self.assertTrue(V.valid_cz_account("107-4649060217/0100"))
+        self.assertTrue(V.valid_cz_account("19-1111111111 / 0800"))
+        self.assertFalse(V.valid_cz_account("358/2013"))          # vyhláška, ne účet
+        self.assertFalse(V.valid_cz_account("1234567890/1234"))   # vzor od modelu
+        self.assertFalse(V.valid_cz_account("0/0100"))
+
+    def test_law_reference_is_not_an_account(self):
+        from uctokit.invoices.heuristics import extract_from_text
+
+        inv = extract_from_text(
+            "Poplatek dle vyhlášky č. 358/2013 Sb.\nÚčet: 107-4649060217/0100\n")
+        self.assertEqual(inv.supplier_account.value, "107-4649060217/0100")
+        inv = extract_from_text("Poplatek dle vyhlášky č. 358/2013 Sb.\n")
+        self.assertFalse(inv.supplier_account.is_present)
+
+    def test_amount_in_text_english_grouping(self):
+        self.assertTrue(V.amount_in_text(Decimal("1815.00"), "Total (CZK) 1,815.00"))
+
     def test_amount_in_text_plain(self):
         self.assertTrue(V.amount_in_text(Decimal("5000.00"), "k úhradě 5000.00"))
 

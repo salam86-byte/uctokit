@@ -149,6 +149,24 @@ def valid_iban(iban: str) -> bool:
         return False
 
 
+# Váhy kontrolní číslice tuzemského účtu (vyhláška ČNB 169/2011): předčíslí
+# a číslo zarovnané doprava, součet součinů musí být dělitelný 11.
+_ACCOUNT_PREFIX_WEIGHTS = (10, 5, 8, 4, 2, 1)
+_ACCOUNT_NUMBER_WEIGHTS = (6, 3, 7, 9, 10, 5, 8, 4, 2, 1)
+
+
+def valid_cz_account(value: str) -> bool:
+    """Může tohle číslo tuzemského účtu existovat? (tvar + mod 11)"""
+    m = re.fullmatch(r"(?:(\d{1,6})-)?(\d{2,10})/(\d{4})", normalize_account(value))
+    if not m:
+        return False
+    prefix, number = (m.group(1) or "").zfill(6), m.group(2).zfill(10)
+    if int(number) == 0:
+        return False
+    return (sum(int(c) * w for c, w in zip(prefix, _ACCOUNT_PREFIX_WEIGHTS)) % 11 == 0
+            and sum(int(c) * w for c, w in zip(number, _ACCOUNT_NUMBER_WEIGHTS)) % 11 == 0)
+
+
 def date_sane(value, *, min_year: int = 2000, max_year: int = 2100) -> bool:
     return isinstance(value, date) and min_year <= value.year <= max_year
 
@@ -158,7 +176,9 @@ def amount_in_text(amount, text) -> bool:
     if amount is None or not text:
         return False
     whole = str(int(amount))
-    grouped = f"{int(amount):,}".replace(",", r"[\s.]?")
+    # Tisíce oddělené mezerou, tečkou i čárkou — anglický zápis „1,815.00"
+    # (Tesla, Stripe) jinak v textu nenašel nic a částka zůstala neověřená.
+    grouped = f"{int(amount):,}".replace(",", r"[\s.,]?")
     pattern = re.compile(rf"{grouped}(?:[.,]\d{{2}})?|{whole}(?:[.,]\d{{2}})?")
     return bool(pattern.search(text))
 
